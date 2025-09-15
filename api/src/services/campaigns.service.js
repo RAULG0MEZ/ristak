@@ -23,14 +23,19 @@ class CampaignsService {
       )
 
       // 2) Visitors from tracking sessions
+      // NOTA: Comentado temporalmente - tracking.sessions no tiene relación con campañas
+      // Si necesitas tracking de visitantes por campaña, deberás implementar el tracking adecuado
+      const visitorsRes = { rows: [] }
+      /*
       const visitorsRes = await databasePool.query(
         `SELECT ad_id, COUNT(DISTINCT visitor_id) AS visitors
-         FROM tracking_sessions
+         FROM tracking.sessions
          WHERE ad_id IS NOT NULL AND ts >= $1 AND ts <= $2
          GROUP BY ad_id
         `,
         [startDate, endDate]
       )
+      */
 
       // 3) Leads from contacts (Last Attribution: fecha de creación del contacto)
       // 🚨🚨🚨 IMPORTANTE - SOLUCIÓN TEMPORAL 🚨🚨🚨

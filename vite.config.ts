@@ -10,7 +10,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL || 'http://localhost:5001', // API SIEMPRE EN 5001
+        target: process.env.VITE_API_URL || 'http://localhost:3002', // API en puerto 3002
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path // Mantener la ruta /api

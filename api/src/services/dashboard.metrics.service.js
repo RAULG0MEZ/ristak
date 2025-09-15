@@ -64,12 +64,9 @@ class DashboardMetricsService {
   
   async getFunnelMetrics(startDate, endDate) {
     try {
-      // Get unique visitors from tracking_sessions
-      const visitorsQuery = `
-        SELECT COUNT(DISTINCT visitor_id) as visitor_count
-        FROM tracking_sessions
-        WHERE ts >= $1 AND ts <= $2
-      `;
+      // Get unique visitors - TRACKING NO IMPLEMENTADO AÚN
+      // Por ahora retornamos 0 visitantes hasta implementar tracking
+      const visitorsQuery = `SELECT 0 as visitor_count`;
       
       // Get leads count
       const leadsQuery = `
@@ -95,7 +92,7 @@ class DashboardMetricsService {
       `;
       
       const [visitors, leads, appointments, customers] = await Promise.all([
-        databasePool.query(visitorsQuery, [startDate, endDate]),
+        databasePool.query(visitorsQuery), // Sin parámetros porque no consulta tracking
         databasePool.query(leadsQuery, [startDate, endDate]),
         databasePool.query(appointmentsQuery, [startDate, endDate]),
         databasePool.query(customersQuery, [startDate, endDate])
@@ -115,18 +112,11 @@ class DashboardMetricsService {
   
   async getTrafficSources(startDate, endDate) {
     try {
-      const query = `
-        SELECT 
-          COALESCE(campaign_name, 'Direct') as traffic_source,
-          COUNT(*) as session_count
-        FROM tracking_sessions
-        WHERE ts >= $1 AND ts <= $2
-        GROUP BY campaign_name
-        ORDER BY session_count DESC
-        LIMIT 5
-      `;
-      
-      const result = await databasePool.query(query, [startDate, endDate]);
+      // Traffic sources - TRACKING NO IMPLEMENTADO AÚN
+      // Por ahora retornamos array vacío hasta implementar tracking
+      const query = `SELECT 'Direct' as traffic_source, 0 as session_count WHERE 1=0`;
+
+      const result = await databasePool.query(query); // Sin parámetros porque no consulta tracking
       
       const total = result.rows.reduce((sum, row) => sum + parseInt(row.session_count), 0);
       

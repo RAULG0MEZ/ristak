@@ -19,14 +19,11 @@ class ReportsService {
            ORDER BY period`,
           [startDate, endDate, unit]
         ),
+        // Visitors - TRACKING NO IMPLEMENTADO AÚN
+        // Por ahora retornamos 0 visitantes hasta implementar tracking
         databasePool.query(
-          `SELECT DATE_TRUNC($3, ts) AS period,
-                  COUNT(DISTINCT visitor_id) AS visitors
-           FROM tracking_sessions
-           WHERE ts >= $1 AND ts <= $2
-           GROUP BY period
-           ORDER BY period`,
-          [startDate, endDate, unit]
+          `SELECT DATE_TRUNC($1, NOW()) AS period, 0 AS visitors`,
+          [unit]
         ),
         // TODOS los contactos creados en el período (sin importar attribution_ad_id)
         databasePool.query(
@@ -193,14 +190,11 @@ class ReportsService {
           [startDate, endDate, unit]
         ),
         // Visitantes totales (sin filtro de atribución)
+        // Visitors - TRACKING NO IMPLEMENTADO AÚN
+        // Por ahora retornamos 0 visitantes hasta implementar tracking
         databasePool.query(
-          `SELECT DATE_TRUNC($3, ts) AS period,
-                  COUNT(DISTINCT visitor_id) AS visitors
-           FROM tracking_sessions
-           WHERE ts >= $1 AND ts <= $2
-           GROUP BY period
-           ORDER BY period`,
-          [startDate, endDate, unit]
+          `SELECT DATE_TRUNC($1, NOW()) AS period, 0 AS visitors`,
+          [unit]
         ),
         // Solo contactos con attribution_ad_id Y que coincidan con anuncio activo
         databasePool.query(

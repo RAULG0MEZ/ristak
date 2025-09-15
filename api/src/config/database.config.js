@@ -5,9 +5,9 @@ require('dotenv').config({ path: path.join(__dirname, '../../../.env.local') });
 // Database connection pool configuration
 const databasePool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
+  ssl: process.env.NODE_ENV === 'production' ? {
     rejectUnauthorized: false
-  },
+  } : false,
   max: 20, // maximum number of connections
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
