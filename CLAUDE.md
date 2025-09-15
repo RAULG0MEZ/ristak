@@ -232,6 +232,37 @@ PREVENCIÓN:
 - Documentar cambios de puerto en .env o variables de entorno
 - Probar endpoints de API antes de asumir que el problema es del frontend
 
+---
+
+PROBLEMA: Frontend llama a API de producción en lugar de localhost
+SÍNTOMAS:
+- Console muestra errores con URLs de producción (ej: app.hollytrack.com)
+- Las tablas de campañas y reportes aparecen vacías
+- Error 500 en llamadas a la API de producción desde localhost
+
+CAUSA RAÍZ:
+- El archivo .env.local contiene VITE_API_URL apuntando a producción
+- NODE_ENV está configurado como 'production' en desarrollo local
+
+SOLUCIÓN (2025-09-15):
+1) Editar .env.local:
+   - Cambiar VITE_API_URL=http://localhost:3002/api
+   - Cambiar NODE_ENV=development
+2) Reiniciar el servidor (matar proceso y volver a ejecutar npm run dev)
+3) Refrescar el navegador con Ctrl+Shift+R para limpiar cache
+
+VERIFICACIÓN:
+# Confirmar que la API responde localmente
+curl "http://localhost:3002/api/campaigns?start=2024-01-01&end=2024-12-31"
+
+# Verificar que el proxy de Vite funciona
+curl "http://localhost:5173/api/campaigns?start=2024-01-01&end=2024-12-31"
+
+PREVENCIÓN:
+- Mantener .env.local con configuración de desarrollo
+- Crear .env.production separado para deployments
+- Nunca commitear .env.local al repositorio
+
 FIN.
 - PROMPT ÚNICO PARA IA PROGRAMADORA — FRONT NUEVO + BACKEND PROPIO ORDENADO (SIN ROMPER NADA)
 
