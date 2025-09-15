@@ -1,0 +1,217 @@
+import { useState, useEffect } from 'react'
+import { formatCurrency } from '../lib/utils'
+import { getApiUrl } from '../config/api'
+
+export interface DateRange {
+  start: Date
+  end: Date
+}
+
+interface DashboardMetrics {
+  netIncome: number
+  adSpend: number
+  grossProfit: number
+  roas: number
+  vatToPay: number
+  netProfit: number
+  refunds: number
+  avgLTV: number
+  visitors: number
+  leads: number
+  qualified: number
+  customers: number
+  trends: {
+    netIncome: number
+    adSpend: number
+    grossProfit: number
+    roas: number
+    vatToPay: number
+    netProfit: number
+    refunds: number
+    avgLTV: number
+  }
+}
+
+export interface FormattedDashboardMetrics {
+  financialMetrics: Array<{
+    label: string
+    value: string | number
+    change: number
+    trend: 'up' | 'down' | 'neutral'
+    suffix?: string
+  }>
+  obligationsMetrics: Array<{
+    label: string
+    value: string | number
+    change: number
+    trend: 'up' | 'down' | 'neutral'
+  }>
+  funnelData: Array<{
+    stage: string
+    value: number
+    icon: any
+    color: string
+    bgColor: string
+  }>
+  loading: boolean
+  error: string | null
+}
+
+export function useDashboardMetrics(dateRange: DateRange): FormattedDashboardMetrics {
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function fetchMetrics() {
+      try {
+        setLoading(true)
+        setError(null)
+        
+        // Fetch real data from API
+        // Format dates as YYYY-MM-DD for the API
+        const startDate = dateRange.start.toISOString().split('T')[0]
+        const endDate = dateRange.end.toISOString().split('T')[0]
+
+        const response = await fetch(
+          getApiUrl(`/dashboard/metrics?start=${startDate}&end=${endDate}`)
+        )
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch metrics')
+        }
+        
+        const data = await response.json()
+        setMetrics(data)
+      } catch (err) {
+        console.error('Error loading dashboard metrics:', err)
+        setError('Error al cargar las métricas')
+        
+        // Fallback to default data if API fails
+        setMetrics({
+          netIncome: 245000,
+          adSpend: 85000,
+          grossProfit: 160000,
+          roas: 2.88,
+          vatToPay: 39200,
+          netProfit: 120800,
+          refunds: 5000,
+          avgLTV: 1250,
+          visitors: 12456,
+          leads: 3842,
+          qualified: 892,
+          customers: 245,
+          trends: {
+            netIncome: 12.5,
+            adSpend: -8.2,
+            grossProfit: 18.7,
+            roas: 15.3,
+            vatToPay: 10.2,
+            netProfit: 22.1,
+            refunds: -5.4,
+            avgLTV: 8.9
+          }
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchMetrics()
+  }, [dateRange.start, dateRange.end])
+
+  // Format metrics for dashboard display
+  const financialMetrics = metrics ? [
+    {
+      label: 'Ingresos Netos',
+      value: formatCurrency(metrics.netIncome),
+      change: metrics.trends.netIncome,
+      trend: (metrics.trends.netIncome > 0 ? 'up' : metrics.trends.netIncome < 0 ? 'down' : 'neutral') as 'up' | 'down' | 'neutral'
+    },
+    {
+      label: 'Gastos de Publicidad',
+      value: formatCurrency(metrics.adSpend),
+      change: metrics.trends.adSpend,
+      trend: (metrics.trends.adSpend < 0 ? 'up' : metrics.trends.adSpend > 0 ? 'down' : 'neutral') as 'up' | 'down' | 'neutral'
+    },
+    {
+      label: 'Ganancia Bruta',
+      value: formatCurrency(metrics.grossProfit),
+      change: metrics.trends.grossProfit,
+      trend: (metrics.trends.grossProfit > 0 ? 'up' : metrics.trends.grossProfit < 0 ? 'down' : 'neutral') as 'up' | 'down' | 'neutral'
+    },
+    {
+      label: 'ROAS',
+      value: metrics.roas.toFixed(2),
+      suffix: 'x',
+      change: metrics.trends.roas,
+      trend: (metrics.trends.roas > 0 ? 'up' : metrics.trends.roas < 0 ? 'down' : 'neutral') as 'up' | 'down' | 'neutral'
+    }
+  ] : []
+
+  const obligationsMetrics = metrics ? [
+    {
+      label: 'IVA a Pagar',
+      value: formatCurrency(metrics.vatToPay),
+      change: metrics.trends.vatToPay,
+      trend: (metrics.trends.vatToPay > 0 ? 'up' : metrics.trends.vatToPay < 0 ? 'down' : 'neutral') as 'up' | 'down' | 'neutral'
+    },
+    {
+      label: 'Ganancia Neta',
+      value: formatCurrency(metrics.netProfit),
+      change: metrics.trends.netProfit,
+      trend: (metrics.trends.netProfit > 0 ? 'up' : metrics.trends.netProfit < 0 ? 'down' : 'neutral') as 'up' | 'down' | 'neutral'
+    },
+    {
+      label: 'Reembolsos',
+      value: formatCurrency(metrics.refunds),
+      change: metrics.trends.refunds,
+      trend: (metrics.trends.refunds < 0 ? 'up' : metrics.trends.refunds > 0 ? 'down' : 'neutral') as 'up' | 'down' | 'neutral'
+    },
+    {
+      label: 'LTV Promedio',
+      value: formatCurrency(metrics.avgLTV),
+      change: metrics.trends.avgLTV,
+      trend: (metrics.trends.avgLTV > 0 ? 'up' : metrics.trends.avgLTV < 0 ? 'down' : 'neutral') as 'up' | 'down' | 'neutral'
+    }
+  ] : []
+
+  const funnelData = metrics ? [
+    {
+      stage: 'Visitantes',
+      value: metrics.visitors,
+      icon: 'mousePointer',
+      color: 'from-accent-blue to-accent-purple',
+      bgColor: 'bg-accent-blue/10'
+    },
+    {
+      stage: 'Leads',
+      value: metrics.leads,
+      icon: 'userPlus',
+      color: 'from-indigo-400 to-indigo-600',
+      bgColor: 'bg-indigo-500/10'
+    },
+    {
+      stage: 'Citas',
+      value: metrics.qualified,
+      icon: 'calendar',
+      color: 'from-purple-400 to-purple-600',
+      bgColor: 'bg-purple-500/10'
+    },
+    {
+      stage: 'Ventas',
+      value: metrics.customers,
+      icon: 'shoppingCart',
+      color: 'from-green-400 to-green-600',
+      bgColor: 'bg-green-500/10'
+    }
+  ] : []
+
+  return {
+    financialMetrics,
+    obligationsMetrics,
+    funnelData,
+    loading,
+    error
+  }
+}

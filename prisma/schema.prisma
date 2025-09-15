@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  accountId    String   @map("account_id")
+  eventId      String   @map("event_id")
+  eventName    String   @map("event_name")
+  ts           DateTime @default(now())
+  url          String?
+  visitorId    String?  @map("visitor_id")
+  sessionId    String?  @map("session_id")
+  fbclid       String?
+  campaignId   String?  @map("campaign_id")
+  adsetId      String?  @map("adset_id")
+  adId         String?  @map("ad_id")
+  campaignName String?  @map("campaign_name")
+  adsetName    String?  @map("adset_name")
+  adName       String?  @map("ad_name")
+  fbp          String?
+  email        String?
+  phone        String?
+  ip           String?
+  ua           String?
+  value        Decimal? @db.Decimal(14, 2)
+  currency     String?
+  contactId    String?  @map("contact_id")
+  properties   Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([accountId, eventId])
+  @@index([createdAt])
+  @@index([visitorId])
+  @@index([sessionId])
+  @@index([fbclid])
+  @@index([adId])
+  @@map("tracking_sessions")
+}
+
+model Contact {
+  contact_id      String        @id
+  firstName       String?       @map("first_name")
+  lastName        String?       @map("last_name")
+  email           String?
+  phone           String?
+  company         String?
+  attributionAdId String?       @map("attribution_ad_id")
+  ext_crm_id      String?       @unique(map: "contacts_ghl_id_key")
+  status          String?
+  source          String?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  appointments    Appointment[]
+  payments        Payment[]
+
+  @@index([attributionAdId])
+  @@map("contacts")
+}
+
+model Appointment {
+  id         String   @id @default(uuid())
+  contactId  String   @map("contact_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  metadata   Json?    @default("{}")
+  ext_crm_id String?
+  contact    Contact  @relation(fields: [contactId], references: [contact_id])
+
+  @@index([contactId])
+  @@index([contactId, ext_crm_id], map: "idx_appointments_contact_ext_crm")
+  @@index([ext_crm_id], map: "idx_appointments_ext_crm_id")
+  @@map("appointments")
+}
+
+model Payment {
+  id            String    @id @default(uuid())
+  contactId     String    @map("contact_id")
+  amount        Decimal   @db.Decimal(14, 2)
+  currency      String    @default("MXN")
+  transactionId String    @unique @map("transaction_id")
+  paymentMethod String?   @map("payment_method")
+  status        String    @default("pending")
+  description   String?
+  invoiceNumber String?   @map("invoice_number")
+  paidAt        DateTime? @map("paid_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  ext_crm_id    String?
+  contact       Contact   @relation(fields: [contactId], references: [contact_id])
+
+  @@index([contactId])
+  @@index([paidAt])
+  @@index([contactId, ext_crm_id], map: "idx_payments_contact_ext_crm")
+  @@index([ext_crm_id], map: "idx_payments_ext_crm_id")
+  @@map("payments")
+}
+
+model WebhookLog {
+  id        String   @id @default(uuid())
+  endpoint  String
+  method    String
+  headers   Json?
+  body      Json?
+  status    Int
+  response  Json?
+  error     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("webhook_logs")
+}
+
+enum credential_status {
+  NOT_CONNECTED
+  CONNECTING
+  CONNECTED
+  EXPIRED
+  ERROR
+  REVOKED
+}

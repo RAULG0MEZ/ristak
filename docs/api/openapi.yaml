@@ -1,0 +1,76 @@
+openapi: 3.0.3
+info:
+  title: Ristak PRO API
+  version: 1.0.0
+  description: Minimal API for Meta integration and reporting
+servers:
+  - url: http://localhost:3002/api
+paths:
+  /meta/oauth/start:
+    get:
+      summary: Redirects to Meta OAuth login
+      parameters:
+        - in: query
+          name: state
+          schema: { type: string }
+      responses:
+        '302': { description: Redirect to Meta }
+  /meta/oauth/callback:
+    get:
+      summary: Meta OAuth callback handler
+      parameters:
+        - in: query
+          name: code
+          schema: { type: string }
+      responses:
+        '200': { description: HTML page closing popup }
+  /meta/config:
+    get:
+      summary: Get current Meta configuration (safe)
+      responses:
+        '200':
+          description: Current config
+  /meta/adaccounts:
+    get:
+      summary: List ad accounts for connected user
+      responses:
+        '200': { description: OK }
+  /meta/pixels:
+    get:
+      summary: List pixels for an ad account
+      parameters:
+        - in: query
+          name: ad_account_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /meta/configure:
+    post:
+      summary: Save selection and start initial sync
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                adAccountId: { type: string }
+                adAccountName: { type: string }
+                pixelId: { type: string }
+                pixelName: { type: string }
+                sinceDate: { type: string, format: date }
+                schedule: { type: string, enum: [ '1h','3h','6h','12h','24h' ] }
+              required: [ adAccountId, pixelId, sinceDate, schedule ]
+      responses:
+        '202': { description: Accepted }
+  /meta/sync:
+    post:
+      summary: Trigger sync manually
+      responses:
+        '202': { description: Accepted }
+  /meta/sync/status:
+    get:
+      summary: Get current sync status
+      responses:
+        '200': { description: OK }
