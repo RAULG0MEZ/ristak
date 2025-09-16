@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react'
+import ReactDOM from 'react-dom'
 import { cn } from '../lib/utils'
 import { Icons } from '../icons'
 
@@ -90,8 +91,8 @@ interface ToastManagerProps {
 }
 
 export function ToastManager({ toasts, onRemove }: ToastManagerProps) {
-  return (
-    <div className="fixed top-0 right-0 z-50 pointer-events-none">
+  const toastContent = (
+    <div className="fixed top-0 right-0 z-[10000] pointer-events-none" style={{ isolation: 'isolate' }}>
       <div className="flex flex-col gap-2 p-4 pointer-events-auto">
         {toasts.map((toast, index) => (
           <div
@@ -109,5 +110,14 @@ export function ToastManager({ toasts, onRemove }: ToastManagerProps) {
         ))}
       </div>
     </div>
+  )
+
+  // Renderizar en el contenedor de toasts que está después del modal
+  const toastRoot = document.getElementById('toast-root')
+  if (!toastRoot) return null
+
+  return ReactDOM.createPortal(
+    toastContent,
+    toastRoot
   )
 }

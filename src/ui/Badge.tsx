@@ -13,28 +13,28 @@ export function Badge({
 }: BadgeProps) {
   const variants = {
     // Neutral - para leads, estados generales
-    default: 'bg-primary/5 border border-primary/10 text-secondary',
-    neutral: 'bg-primary/5 border border-primary/10 text-secondary',
-    secondary: 'bg-primary/5 border border-primary/10 text-tertiary',
+    default: 'bg-primary/10 text-secondary',
+    neutral: 'bg-primary/10 text-secondary',
+    secondary: 'bg-primary/10 text-tertiary',
 
     // Success - pagos completados, clientes activos
-    success: 'bg-success-10 border border-success-20 text-success',
-    primary: 'bg-success-10 border border-success-20 text-success',
+    success: 'bg-success/10 text-success',
+    primary: 'bg-success/10 text-success',
 
     // Warning - pendiente, citas agendadas
-    warning: 'bg-warning-10 border border-warning-20 text-warning',
+    warning: 'bg-warning/10 text-warning',
 
     // Error - reembolsado, cancelado
-    error: 'bg-error-10 border border-error-20 text-error',
+    error: 'bg-error/10 text-error',
 
     // Info - información general
-    info: 'bg-info-10 border border-info-20 text-info',
+    info: 'bg-info/10 text-info',
   }
 
   return (
     <span
       className={cn(
-        'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium transition-all border',
+        'inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium transition-all',
         variants[variant],
         className
       )}

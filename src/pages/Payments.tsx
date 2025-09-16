@@ -238,11 +238,15 @@ export function Payments() {
           <KPICard
             title="Ingresos Netos"
             value={formatCurrency(metrics?.netRevenue || 0)}
-            change={15.3}
-            trend="up"
+            change={metrics?.trends?.netRevenue || 0}
+            trend={
+              metrics?.trends?.netRevenue > 0 ? 'up' :
+              metrics?.trends?.netRevenue < 0 ? 'down' : 'up'
+            }
             icon={Icons.dollarSign}
             iconColor="text-primary"
             iconBgColor="glass"
+            className={loading ? 'animate-pulse' : ''}
           />
 
           <KPICard
@@ -257,11 +261,15 @@ export function Payments() {
           <KPICard
             title="Ticket Promedio"
             value={formatCurrency(metrics?.avgPayment || 0)}
-            change={8.2}
-            trend="up"
+            change={metrics?.trends?.avgPayment || 0}
+            trend={
+              metrics?.trends?.avgPayment > 0 ? 'up' :
+              metrics?.trends?.avgPayment < 0 ? 'down' : 'up'
+            }
             icon={Icons.trendingUp}
             iconColor="text-primary"
             iconBgColor="glass"
+            className={loading ? 'animate-pulse' : ''}
           />
 
           <KPICard

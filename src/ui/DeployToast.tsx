@@ -1,4 +1,5 @@
 import React from 'react'
+import ReactDOM from 'react-dom'
 import { X, Rocket, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -50,8 +51,8 @@ export function DeployToast({ isOpen, status, message, logs = [], onClose }: Dep
     return 'w-0'
   }
 
-  return (
-    <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-2 fade-in duration-300">
+  const deployToastContent = (
+    <div className="fixed bottom-4 right-4 z-[10000] animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ isolation: 'isolate' }}>
       <div className="w-[420px] bg-secondary dark:glass rounded-xl overflow-hidden border border-primary dark:border-glassBorder shadow-2xl">
         {/* Header */}
         <div className="px-4 py-3 bg-tertiary dark:glass-subtle border-b border-primary dark:border-glassBorder">
@@ -99,7 +100,7 @@ export function DeployToast({ isOpen, status, message, logs = [], onClose }: Dep
         {(status === 'deploying' || status === 'success') && (
           <div className="px-4 pb-3">
             <div className="h-1.5 bg-primary dark:glass-subtle rounded-full overflow-hidden">
-              <div 
+              <div
                 className={cn(
                   "h-full rounded-full transition-all duration-1000",
                   status === 'deploying' ? 'bg-gradient-to-r from-accent-blue via-accent-purple to-accent-blue animate-pulse' : 'bg-success',
@@ -113,7 +114,7 @@ export function DeployToast({ isOpen, status, message, logs = [], onClose }: Dep
         {/* Action buttons for error state */}
         {status === 'error' && (
           <div className="px-4 pb-3">
-            <button 
+            <button
               onClick={onClose}
               className="w-full py-2 bg-primary hover:bg-tertiary dark:glass-hover rounded-lg text-sm font-medium text-error dark:hover:glass-primary transition-all"
             >
@@ -123,5 +124,14 @@ export function DeployToast({ isOpen, status, message, logs = [], onClose }: Dep
         )}
       </div>
     </div>
+  )
+
+  // Renderizar en el contenedor de toasts que está después del modal
+  const toastRoot = document.getElementById('toast-root')
+  if (!toastRoot) return null
+
+  return ReactDOM.createPortal(
+    deployToastContent,
+    toastRoot
   )
 }

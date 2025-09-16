@@ -15,7 +15,7 @@ interface TabListProps {
 
 export function TabList({ tabs, value, onChange, className }: TabListProps) {
   return (
-    <div className={cn("flex glass border border-primary rounded-xl p-1", className)}>
+    <div className={cn("flex glass rounded-xl p-1", className)}>
       {tabs.map(tab => (
         <button
           key={tab.value}

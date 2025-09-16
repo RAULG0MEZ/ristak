@@ -64,10 +64,34 @@ export function Reports() {
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [summaryMetrics, setSummaryMetrics] = useState<any>(null)
+  const [metricsLoading, setMetricsLoading] = useState(false)
 
   useEffect(() => {
     fetchMetrics()
   }, [viewType, reportType, monthRange, yearRange, dateRange, customMonthYear, customMonthStart, customMonthEnd])
+
+  // Fetch summary metrics with trends
+  useEffect(() => {
+    async function fetchSummaryMetrics() {
+      try {
+        setMetricsLoading(true)
+        const { start, end } = getDateRangeForAPI()
+        const response = await fetch(
+          getApiUrl(`/reports/summary-metrics?start=${start}&end=${end}`)
+        )
+        if (response.ok) {
+          const data = await response.json()
+          setSummaryMetrics(data)
+        }
+      } catch (error) {
+        console.error('Error fetching summary metrics:', error)
+      } finally {
+        setMetricsLoading(false)
+      }
+    }
+    fetchSummaryMetrics()
+  }, [viewType, monthRange, yearRange, dateRange, customMonthYear, customMonthStart, customMonthEnd])
 
   useEffect(() => {
     let timer: any
@@ -530,7 +554,7 @@ export function Reports() {
             <TabList
               tabs={[
                 { value: 'cashflow', label: 'Todos' },
-                { value: 'campaigns', label: 'Atribuidos' }
+                { value: 'campaigns', label: 'Última atribución' }
               ]}
               value={reportType}
               onChange={(value) => setReportType(value as ReportType)}
@@ -588,34 +612,52 @@ export function Reports() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <KPICard
               title="Ingresos"
-              value={formatCurrency(totals.revenue)}
+              value={formatCurrency(summaryMetrics?.revenue || totals.revenue)}
               icon={Icons.dollarSign}
               iconColor="text-primary"
-              change={12.5}
-              trend="up"
+              change={summaryMetrics?.trends?.revenue || 0}
+              trend={
+                summaryMetrics?.trends?.revenue > 0 ? 'up' :
+                summaryMetrics?.trends?.revenue < 0 ? 'down' : 'up'
+              }
+              className={metricsLoading ? 'animate-pulse' : ''}
             />
             <KPICard
               title="Ganancia"
-              value={formatCurrency(profit)}
+              value={formatCurrency(summaryMetrics?.profit || profit)}
               icon={Icons.trendingUp}
               iconColor="text-primary"
-              change={profitMargin}
-              trend={profit > 0 ? 'up' : 'down'}
+              change={summaryMetrics?.trends?.profit || profitMargin}
+              trend={
+                summaryMetrics?.trends?.profit > 0 ? 'up' :
+                summaryMetrics?.trends?.profit < 0 ? 'down' :
+                profit > 0 ? 'up' : 'down'
+              }
+              className={metricsLoading ? 'animate-pulse' : ''}
             />
             <KPICard
               title="Clientes Nuevos"
-              value={formatNumber(totals.new_customers || 0)}
+              value={formatNumber(summaryMetrics?.newCustomers || totals.new_customers || 0)}
               icon={Icons.users}
               iconColor="text-primary"
-              trend="up"
+              change={summaryMetrics?.trends?.newCustomers || 0}
+              trend={
+                summaryMetrics?.trends?.newCustomers > 0 ? 'up' :
+                summaryMetrics?.trends?.newCustomers < 0 ? 'down' : 'up'
+              }
+              className={metricsLoading ? 'animate-pulse' : ''}
             />
             <KPICard
               title="Gastos"
-              value={formatCurrency(totals.spend)}
+              value={formatCurrency(summaryMetrics?.spend || totals.spend)}
               icon={Icons.target}
               iconColor="text-primary"
-              change={expensePercentage}
-              trend="down"
+              change={summaryMetrics?.trends?.spend || expensePercentage}
+              trend={
+                summaryMetrics?.trends?.spend < 0 ? 'up' :
+                summaryMetrics?.trends?.spend > 0 ? 'down' : 'down'
+              }
+              className={metricsLoading ? 'animate-pulse' : ''}
             />
           </div>
         )}

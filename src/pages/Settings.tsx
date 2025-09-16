@@ -8,6 +8,7 @@ import { useImportJobs } from '../hooks/useImportJobs'
 import { ImportProgress } from '../ui/ImportProgress'
 import { useToastActions } from '../hooks/useToast'
 import { getApiUrl, getMetaRedirectUri } from '../config/api'
+import { TrackingSection } from '../modules/tracking/TrackingSection'
 
 interface WebhookEndpoint {
   name: string
@@ -264,7 +265,7 @@ export function Settings() {
   const sidebarItems = [
     { id: 'account', label: 'Cuenta', icon: Icons.settings, description: 'Información general' },
     { id: 'notifications', label: 'Notificaciones', icon: Icons.bell, description: 'Alertas y avisos' },
-    { id: 'snippet', label: 'Script Tracking', icon: Icons.code, description: 'Código JavaScript' },
+    { id: 'tracking', label: 'Tracking', icon: Icons.code, description: 'Dominios y Scripts' },
     { id: 'integrations', label: 'Integraciones', icon: Icons.globe, description: 'Conectar servicios' },
     { id: 'webhooks', label: 'Webhooks', icon: Icons.webhook, description: 'Endpoints de API' },
     { id: 'logs', label: 'Logs', icon: Icons.logs, description: 'Historial de webhooks' },
@@ -446,93 +447,8 @@ export function Settings() {
               </div>
             )}
 
-            {activeSection === 'snippet' && (
-              <Card variant="glass">
-                <div className="p-6">
-                  <h3 className="text-lg font-semibold text-primary mb-2">Script de Tracking</h3>
-                  <p className="text-sm text-secondary mb-6">
-                    Agrega este script antes del cierre de la etiqueta &lt;/body&gt; en tu sitio web
-                  </p>
-
-                  <div className="relative mb-6">
-                    <pre className="glass text-success p-6 rounded-lg overflow-x-auto text-sm font-mono">
-                      <code>{snippetCode}</code>
-                    </pre>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="absolute top-3 right-3"
-                      onClick={() => copyToClipboard(snippetCode)}
-                    >
-                      {copiedText === snippetCode ? (
-                        <>
-                          <Icons.checkCircle className="w-4 h-4 mr-2 text-success" />
-                          Copiado
-                        </>
-                      ) : (
-                        <>
-                          <Icons.copy className="w-4 h-4 mr-2" />
-                          Copiar
-                        </>
-                      )}
-                    </Button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Card variant="glass" className="p-4">
-                      <h4 className="font-medium text-primary mb-2 flex items-center">
-                        <Icons.shield className="w-4 h-4 mr-2" />
-                        Cookie Tracking
-                      </h4>
-                      <p className="text-sm text-tertiary">
-                        Crea una cookie _htid única con UUID para identificar visitantes. 
-                        Duración: 1 año
-                      </p>
-                    </Card>
-
-                    <Card variant="glass" className="p-4">
-                      <h4 className="font-medium text-primary mb-2 flex items-center">
-                        <Icons.globe className="w-4 h-4 mr-2" />
-                        Tracking Automático
-                      </h4>
-                      <p className="text-sm text-tertiary">
-                        Envía eventos PageView con información del visitante y parámetros UTM
-                      </p>
-                    </Card>
-
-                    <Card variant="glass" className="p-4">
-                      <h4 className="font-medium text-primary mb-2 flex items-center">
-                        <Icons.database className="w-4 h-4 mr-2" />
-                        LocalStorage
-                      </h4>
-                      <p className="text-sm text-tertiary">
-                        Lee localStorage["_ud"] para obtener información adicional del contacto
-                      </p>
-                    </Card>
-
-                    <Card variant="glass" className="p-4">
-                      <h4 className="font-medium text-primary mb-2 flex items-center">
-                        <Icons.bell className="w-4 h-4 mr-2" />
-                        Detección de Formularios
-                      </h4>
-                      <p className="text-sm text-tertiary">
-                        Detecta y trackea envíos de formularios como eventos "Lead"
-                      </p>
-                    </Card>
-                  </div>
-
-                  <div className="mt-6 glass rounded-lg p-4">
-                    <h4 className="font-medium text-primary mb-3">Función Global JavaScript</h4>
-                    <code className="text-sm glass text-primary px-3 py-2 rounded block font-mono">
-                      window.htTrack(eventName, additionalData)
-                    </code>
-                    <p className="text-sm text-secondary mt-3">
-                      Usa esta función para enviar eventos personalizados desde tu código JavaScript.
-                      Los datos personales se hashean automáticamente con SHA-256.
-                    </p>
-                  </div>
-                </div>
-              </Card>
+            {activeSection === 'tracking' && (
+              <TrackingSection />
             )}
 
             {activeSection === 'account' && (

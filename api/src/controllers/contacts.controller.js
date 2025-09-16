@@ -1,4 +1,5 @@
 const contactsService = require('../services/contacts.service');
+const contactsMetricsService = require('../services/contacts.metrics.service');
 
 async function getContacts(req, res) {
   try {
@@ -32,21 +33,31 @@ async function getContacts(req, res) {
 async function getContactMetrics(req, res) {
   try {
     const { start, end } = req.query;
-    
+
     if (!start || !end) {
       return res.status(400).json({
         error: 'Start and end dates are required'
       });
     }
-    
+
     const startDate = new Date(start);
     const endDate = new Date(end);
-    
-    const metrics = await contactsService.getContactMetrics(startDate, endDate);
-    
+
+    // Get both old metrics and new metrics with trends
+    const [oldMetrics, metricsWithTrends] = await Promise.all([
+      contactsService.getContactMetrics(startDate, endDate),
+      contactsMetricsService.getContactsMetrics(startDate, endDate)
+    ]);
+
+    // Combine both responses
+    const combinedMetrics = {
+      ...oldMetrics,
+      trends: metricsWithTrends.trends
+    };
+
     res.json({
       success: true,
-      data: metrics
+      data: combinedMetrics
     });
   } catch (error) {
     console.error('Contact metrics error:', error);

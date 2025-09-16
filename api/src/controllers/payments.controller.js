@@ -1,4 +1,5 @@
 const paymentsService = require('../services/payments.service');
+const paymentsMetricsService = require('../services/payments.metrics.service');
 
 async function getPayments(req, res) {
   try {
@@ -32,21 +33,31 @@ async function getPayments(req, res) {
 async function getPaymentMetrics(req, res) {
   try {
     const { start, end } = req.query;
-    
+
     if (!start || !end) {
       return res.status(400).json({
         error: 'Start and end dates are required'
       });
     }
-    
+
     const startDate = new Date(start);
     const endDate = new Date(end);
-    
-    const metrics = await paymentsService.getPaymentMetrics(startDate, endDate);
-    
+
+    // Get both old metrics and new metrics with trends
+    const [oldMetrics, metricsWithTrends] = await Promise.all([
+      paymentsService.getPaymentMetrics(startDate, endDate),
+      paymentsMetricsService.getPaymentsMetrics(startDate, endDate)
+    ]);
+
+    // Combine both responses
+    const combinedMetrics = {
+      ...oldMetrics,
+      trends: metricsWithTrends.trends
+    };
+
     res.json({
       success: true,
-      data: metrics
+      data: combinedMetrics
     });
   } catch (error) {
     console.error('Payment metrics error:', error);

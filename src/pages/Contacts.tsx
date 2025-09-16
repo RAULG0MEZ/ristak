@@ -311,11 +311,15 @@ export function Contacts() {
           <KPICard
             title="LTV Total"
             value={formatCurrency(metrics?.totalLTV || 0)}
-            change={15.8}
-            trend="up"
+            change={metrics?.trends?.totalLTV || 0}
+            trend={
+              metrics?.trends?.totalLTV > 0 ? 'up' :
+              metrics?.trends?.totalLTV < 0 ? 'down' : 'up'
+            }
             icon={Icons.dollarSign}
             iconColor="text-primary"
             iconBgColor="glass"
+            className={loading ? 'animate-pulse' : ''}
           />
 
           <KPICard

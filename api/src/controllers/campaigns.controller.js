@@ -1,4 +1,5 @@
 const campaignsService = require('../services/campaigns.service')
+const campaignsMetricsService = require('../services/campaigns.metrics.service')
 
 async function getCampaigns(req, res) {
   try {
@@ -32,4 +33,20 @@ async function getCampaignsChart(req, res) {
   }
 }
 
-module.exports = { getCampaigns, getCampaignsChart }
+async function getCampaignsMetrics(req, res) {
+  try {
+    const { start, end } = req.query
+    if (!start || !end) {
+      return res.status(400).json({ error: 'Start and end dates are required' })
+    }
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    const data = await campaignsMetricsService.getCampaignsMetrics(startDate, endDate)
+    res.json(data)
+  } catch (error) {
+    console.error('Campaigns metrics error:', error)
+    res.status(500).json({ error: 'Failed to fetch campaigns metrics', message: error.message })
+  }
+}
+
+module.exports = { getCampaigns, getCampaignsChart, getCampaignsMetrics }

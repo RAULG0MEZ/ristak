@@ -14,6 +14,7 @@ const deployRoutes = require('./routes/deploy');
 const subaccountRoutes = require('./routes/subaccount.routes');
 const webhookRoutes = require('./routes/webhooks.routes');
 const configRoutes = require('./routes/config.routes');
+const trackingRoutes = require('./routes/tracking.routes');
 
 const app = express();
 const PORT = process.env.API_PORT || 5001; // PUERTO DEFINITIVO API: 5001
@@ -71,6 +72,7 @@ app.use('/api/import', importRoutes);
 app.use('/api/deploy', deployRoutes);
 app.use('/api/subaccount', subaccountRoutes);
 app.use('/api/config', configRoutes);
+app.use('/api/tracking', trackingRoutes);
 
 // Webhook Routes (sin prefijo /api)
 app.use('/', webhookRoutes);

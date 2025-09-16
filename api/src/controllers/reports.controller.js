@@ -1,4 +1,5 @@
 const reportsService = require('../services/reports.service')
+const reportsMetricsService = require('../services/reports.metrics.service')
 
 async function getReportMetrics(req, res) {
   try {
@@ -186,4 +187,24 @@ module.exports = {
   getReportNewCustomers,
   getReportNewCustomersAttributed
 }
+
+// Nueva función para obtener métricas con tendencias
+async function getReportSummaryMetrics(req, res) {
+  try {
+    const { start, end } = req.query
+    if (!start || !end) {
+      return res.status(400).json({ error: 'Start and end dates are required' })
+    }
+
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    const data = await reportsMetricsService.getReportsMetrics(startDate, endDate)
+    res.json(data)
+  } catch (error) {
+    console.error('Report summary metrics error:', error)
+    res.status(500).json({ error: 'Failed to fetch report summary metrics', message: error.message })
+  }
+}
+
+module.exports.getReportSummaryMetrics = getReportSummaryMetrics
 

@@ -20,22 +20,11 @@ class DashboardController {
         dashboardMetricsService.getFinancialMetrics(startDate, endDate),
         dashboardMetricsService.getFunnelMetrics(startDate, endDate)
       ]);
-      
-      // Combine all metrics
+
+      // Combine all metrics (financial already includes trends)
       const metrics = {
         ...financial,
-        ...funnel,
-        avgLTV: 0, // Calculate later if needed
-        trends: {
-          netIncome: 12.5,
-          adSpend: -8.2,
-          grossProfit: 18.7,
-          roas: 15.3,
-          vatToPay: 10.2,
-          netProfit: 22.1,
-          refunds: -5.4,
-          avgLTV: 8.9
-        }
+        ...funnel
       };
       
       res.json(metrics);

@@ -1,6 +1,6 @@
 import React from 'react'
 import { Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui'
-import { formatCurrency, formatNumber, cn } from '../../lib/utils'
+import { formatCurrency, formatNumber } from '../../lib/utils'
 import { SkeletonLoader } from '../../ui/SkeletonLoader'
 
 interface MetricsData {
@@ -143,13 +143,7 @@ export function MetricsTables({ metrics, reportType, loading = false }: MetricsT
                     </div>
                   </div>
                 </TableCell>
-                <TableCell className={cn(
-                  "text-right text-sm font-medium py-2",
-                  item.highlight === 'positive' && "text-success",
-                  item.highlight === 'negative' && "text-error",
-                  item.highlight === 'primary' && "text-info",
-                  !item.highlight && "text-secondary"
-                )}>
+                <TableCell className="text-right text-sm font-medium py-2 text-secondary">
                   {item.value}
                 </TableCell>
               </TableRow>

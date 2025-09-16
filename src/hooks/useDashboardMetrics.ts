@@ -86,32 +86,9 @@ export function useDashboardMetrics(dateRange: DateRange): FormattedDashboardMet
       } catch (err) {
         console.error('Error loading dashboard metrics:', err)
         setError('Error al cargar las métricas')
-        
-        // Fallback to default data if API fails
-        setMetrics({
-          netIncome: 245000,
-          adSpend: 85000,
-          grossProfit: 160000,
-          roas: 2.88,
-          vatToPay: 39200,
-          netProfit: 120800,
-          refunds: 5000,
-          avgLTV: 1250,
-          visitors: 12456,
-          leads: 3842,
-          qualified: 892,
-          customers: 245,
-          trends: {
-            netIncome: 12.5,
-            adSpend: -8.2,
-            grossProfit: 18.7,
-            roas: 15.3,
-            vatToPay: 10.2,
-            netProfit: 22.1,
-            refunds: -5.4,
-            avgLTV: 8.9
-          }
-        })
+
+        // Set to null to show default zeros in the UI
+        setMetrics(null)
       } finally {
         setLoading(false)
       }

@@ -53,6 +53,7 @@ import {
   Chrome,
   Copy,
   Upload,
+  Link,
   UserPlus,
   Edit,
   Trash2,
@@ -68,7 +69,9 @@ import {
   Play,
   Phone,
   Building,
-  Receipt
+  Receipt,
+  AlertTriangle,
+  Lock
 } from 'lucide-react'
 import { Meta } from '@lobehub/icons'
 import { useEffect, useState } from 'react'
@@ -174,9 +177,13 @@ export const Icons = {
   meta: MetaIcon,
   google: Chrome,
   copy: Copy,
+  lock: Lock,
+  link: Link,
+  alertTriangle: AlertTriangle,
   upload: Upload,
   userPlus: UserPlus,
   edit: Edit,
+  trash: Trash2,
   trash2: Trash2,
   save: Save,
   megaphone: Megaphone,

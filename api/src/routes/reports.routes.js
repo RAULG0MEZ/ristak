@@ -1,19 +1,23 @@
 const express = require('express')
 const router = express.Router()
-const { 
-  getReportMetrics, 
-  getReportSales, 
+const {
+  getReportMetrics,
+  getReportSales,
   getReportSalesAttributed,
   getReportLeads,
   getReportLeadsAttributed,
   getReportAppointments,
   getReportAppointmentsAttributed,
   getReportNewCustomers,
-  getReportNewCustomersAttributed
+  getReportNewCustomersAttributed,
+  getReportSummaryMetrics
 } = require('../controllers/reports.controller')
 
 // GET /api/reports/metrics
 router.get('/metrics', getReportMetrics)
+
+// GET /api/reports/summary-metrics
+router.get('/summary-metrics', getReportSummaryMetrics)
 
 // Detailed reports endpoints
 router.get('/sales', getReportSales)

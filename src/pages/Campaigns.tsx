@@ -84,6 +84,8 @@ export function Campaigns() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null)
   const [syncRunning, setSyncRunning] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
+  const [campaignMetrics, setCampaignMetrics] = useState<any>(null)
+  const [metricsLoading, setMetricsLoading] = useState(false)
 
   // Meta configuration modal state
   const [showMetaModal, setShowMetaModal] = useState(false)
@@ -137,6 +139,29 @@ export function Campaigns() {
     poll()
     return () => clearTimeout(timer)
   }, [])
+
+  // Fetch campaign metrics with trends
+  useEffect(() => {
+    async function fetchCampaignMetrics() {
+      try {
+        setMetricsLoading(true)
+        const startDate = dateRange.start.toISOString().split('T')[0]
+        const endDate = dateRange.end.toISOString().split('T')[0]
+        const response = await fetch(
+          getApiUrl(`/campaigns/metrics?start=${startDate}&end=${endDate}`)
+        )
+        if (response.ok) {
+          const data = await response.json()
+          setCampaignMetrics(data)
+        }
+      } catch (error) {
+        console.error('Error fetching campaign metrics:', error)
+      } finally {
+        setMetricsLoading(false)
+      }
+    }
+    fetchCampaignMetrics()
+  }, [dateRange.start, dateRange.end])
 
   const minSinceDate = useMemo(() => {
     const d = new Date(); d.setMonth(d.getMonth() - 35); return d.toISOString().slice(0,10)
@@ -760,51 +785,75 @@ export function Campaigns() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
           <KPICard
             title="Ingresos"
-            value={formatCurrency(totals.revenue)}
-            change={22.4}
-            trend="up"
+            value={formatCurrency(campaignMetrics?.revenue || totals.revenue)}
+            change={campaignMetrics?.trends?.revenue || 0}
+            trend={
+              campaignMetrics?.trends?.revenue > 0 ? 'up' :
+              campaignMetrics?.trends?.revenue < 0 ? 'down' : 'up'
+            }
             icon={Icons.trendingUp}
             iconColor="text-primary"
+            className={metricsLoading ? 'animate-pulse' : ''}
           />
           <KPICard
             title="Inversión Total"
-            value={formatCurrency(totals.spend)}
-            change={12.5}
-            trend="up"
+            value={formatCurrency(campaignMetrics?.spend || totals.spend)}
+            change={campaignMetrics?.trends?.spend || 0}
+            trend={
+              campaignMetrics?.trends?.spend < 0 ? 'up' :
+              campaignMetrics?.trends?.spend > 0 ? 'down' : 'up'
+            }
             icon={Icons.dollarSign}
             iconColor="text-primary"
+            className={metricsLoading ? 'animate-pulse' : ''}
           />
           <KPICard
             title="ROAS Promedio"
-            value={`${avgMetrics.roas.toFixed(2)}x`}
-            change={5.1}
-            trend="up"
+            value={`${(campaignMetrics?.roas || avgMetrics.roas).toFixed(2)}x`}
+            change={campaignMetrics?.trends?.roas || 0}
+            trend={
+              campaignMetrics?.trends?.roas > 0 ? 'up' :
+              campaignMetrics?.trends?.roas < 0 ? 'down' : 'up'
+            }
             icon={Icons.target}
             iconColor="text-primary"
+            className={metricsLoading ? 'animate-pulse' : ''}
           />
           <KPICard
             title="Ventas"
-            value={formatNumber(totals.sales)}
-            change={-3.2}
-            trend="down"
+            value={formatNumber(campaignMetrics?.sales || totals.sales)}
+            change={campaignMetrics?.trends?.sales || 0}
+            trend={
+              campaignMetrics?.trends?.sales > 0 ? 'up' :
+              campaignMetrics?.trends?.sales < 0 ? 'down' : 'down'
+            }
             icon={Icons.shoppingCart}
             iconColor="text-primary"
+            className={metricsLoading ? 'animate-pulse' : ''}
           />
           <KPICard
             title="Leads"
-            value={formatNumber(totals.leads)}
-            change={15.7}
-            trend="up"
+            value={formatNumber(campaignMetrics?.leads || totals.leads)}
+            change={campaignMetrics?.trends?.leads || 0}
+            trend={
+              campaignMetrics?.trends?.leads > 0 ? 'up' :
+              campaignMetrics?.trends?.leads < 0 ? 'down' : 'up'
+            }
             icon={Icons.users}
             iconColor="text-primary"
+            className={metricsLoading ? 'animate-pulse' : ''}
           />
           <KPICard
             title="Clicks"
-            value={formatNumber(totals.clicks)}
-            change={8.3}
-            trend="up"
+            value={formatNumber(campaignMetrics?.clicks || totals.clicks)}
+            change={campaignMetrics?.trends?.clicks || 0}
+            trend={
+              campaignMetrics?.trends?.clicks > 0 ? 'up' :
+              campaignMetrics?.trends?.clicks < 0 ? 'down' : 'up'
+            }
             icon={Icons.mousePointer}
             iconColor="text-primary"
+            className={metricsLoading ? 'animate-pulse' : ''}
           />
         </div>
 

@@ -1,4 +1,5 @@
 import React from 'react'
+import ReactDOM from 'react-dom'
 import { Icons } from '../icons'
 
 interface ModalProps {
@@ -19,25 +20,26 @@ const sizeClasses = {
   xl: 'max-w-4xl',
 }
 
-export function Modal({ 
-  isOpen, 
-  onClose, 
-  title, 
+export function Modal({
+  isOpen,
+  onClose,
+  title,
   icon,
-  children, 
+  children,
   size = 'md',
   showCloseButton = true,
   className = ''
 }: ModalProps) {
   if (!isOpen) return null
 
-  return (
-    <div 
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100]" 
+  const modalContent = (
+    <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999]"
+      style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
       onClick={onClose}
     >
-      <div 
-        className={`bg-secondary dark:glass rounded-xl border border-primary shadow-2xl ${sizeClasses[size]} w-full mx-4 max-h-[90vh] overflow-y-auto z-[101] ${className}`}
+      <div
+        className={`bg-secondary dark:glass rounded-xl border border-primary shadow-2xl ${sizeClasses[size]} w-full mx-4 max-h-[90vh] overflow-y-auto ${className}`}
         onClick={(e) => e.stopPropagation()}
       >
         {(title || showCloseButton) && (
@@ -47,8 +49,8 @@ export function Modal({
               {title && <h2 className="text-lg font-semibold text-primary">{title}</h2>}
             </div>
             {showCloseButton && (
-              <button 
-                onClick={onClose} 
+              <button
+                onClick={onClose}
                 className="text-tertiary hover:text-primary transition-colors"
               >
                 <Icons.x className="w-5 h-5" />
@@ -61,5 +63,14 @@ export function Modal({
         </div>
       </div>
     </div>
+  )
+
+  // Renderizar el modal en su contenedor específico
+  const modalRoot = document.getElementById('modal-root')
+  if (!modalRoot) return null
+
+  return ReactDOM.createPortal(
+    modalContent,
+    modalRoot
   )
 }
