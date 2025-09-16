@@ -353,9 +353,9 @@ class ContactsService {
   }
 
   // Nuevo método para obtener contactos con paginación (sin filtro de fecha)
-  async getContactsPaginated(offset, limit) {
+  async getContactsPaginated(offset, limit, accountId, subaccountId) {
     try {
-      const countQuery = `SELECT COUNT(*) as total FROM contacts`;
+      const countQuery = `SELECT COUNT(*) as total FROM contacts WHERE account_id = $1 AND subaccount_id = $2`;
 
       const dataQuery = `
         SELECT

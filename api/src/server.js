@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
+const { tenantMiddleware, optionalTenantMiddleware } = require('./middleware/tenant.middleware');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const contactsRoutes = require('./routes/contacts.routes');
 const paymentsRoutes = require('./routes/payments.routes');
@@ -85,18 +86,29 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API Routes
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/contacts', contactsRoutes);
-app.use('/api/payments', paymentsRoutes);
-app.use('/api/reports', reportsRoutes);
-app.use('/api/campaigns', campaignsRoutes);
-app.use('/api/meta', metaRoutes);
-app.use('/api/import', importRoutes);
+// Aplicar middleware de tenant a las rutas principales
+// Estas rutas REQUIEREN tenant authentication
+app.use('/api/dashboard', tenantMiddleware, dashboardRoutes);
+app.use('/api/contacts', tenantMiddleware, contactsRoutes);
+app.use('/api/payments', tenantMiddleware, paymentsRoutes);
+app.use('/api/reports', tenantMiddleware, reportsRoutes);
+app.use('/api/campaigns', tenantMiddleware, campaignsRoutes);
+app.use('/api/import', tenantMiddleware, importRoutes);
+app.use('/api/subaccount', tenantMiddleware, subaccountRoutes);
+
+// Estas rutas pueden funcionar con o sin tenant
+app.use('/api/meta', optionalTenantMiddleware, metaRoutes);
+app.use('/api/config', optionalTenantMiddleware, configRoutes);
+app.use('/api/tracking', optionalTenantMiddleware, trackingRoutes);
+
+// Rutas directas para dominios de tracking personalizados
+// Detecta si viene de un dominio de tracking y sirve las rutas sin /api/tracking
+app.get('/snip.js', trackingRoutes);
+app.post('/collect', trackingRoutes);
+app.options('/collect', trackingRoutes);
+
+// Rutas públicas (sin tenant middleware)
 app.use('/api/deploy', deployRoutes);
-app.use('/api/subaccount', subaccountRoutes);
-app.use('/api/config', configRoutes);
-app.use('/api/tracking', trackingRoutes);
 
 // Webhook Routes (sin prefijo /api)
 app.use('/', webhookRoutes);

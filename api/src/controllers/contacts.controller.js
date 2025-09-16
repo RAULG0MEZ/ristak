@@ -4,6 +4,8 @@ const contactsMetricsService = require('../services/contacts.metrics.service');
 async function getContacts(req, res) {
   try {
     const { start, end, page = 1, limit = 50, all = 'false' } = req.query;
+    // Obtener tenant IDs del middleware
+    const { accountId, subaccountId } = req;
 
     // Si all=true, no requiere fechas y trae todos los contactos con paginación
     if (all === 'true') {
@@ -11,7 +13,7 @@ async function getContacts(req, res) {
       const limitNum = parseInt(limit);
       const offset = (pageNum - 1) * limitNum;
 
-      const result = await contactsService.getContactsPaginated(offset, limitNum);
+      const result = await contactsService.getContactsPaginated(offset, limitNum, accountId, subaccountId);
 
       res.json({
         success: true,
@@ -35,7 +37,7 @@ async function getContacts(req, res) {
       const limitNum = parseInt(limit);
       const offset = (pageNum - 1) * limitNum;
 
-      const result = await contactsService.getContactsWithPagination(startDate, endDate, offset, limitNum);
+      const result = await contactsService.getContactsWithPagination(startDate, endDate, offset, limitNum, accountId, subaccountId);
 
       res.json({
         success: true,
