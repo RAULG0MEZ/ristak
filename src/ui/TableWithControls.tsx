@@ -511,7 +511,7 @@ export function TableWithControls({
                 </tr>
               ) : (
                 data.map((row, i) => (
-                  <tr key={i} className="border-b border-primary glass-hover">
+                  <tr key={row.id || i} className="border-b border-primary glass-hover">
                     {visibleColumns.map(column => (
                       <td
                         key={column.id}

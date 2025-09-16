@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { PageContainer, TableWithControls, Badge, Button, DateRangePicker, KPICard, Modal } from '../ui'
+import { PageContainer, TableWithControls, Badge, Button, DateRangePicker, KPICard, Modal, Pagination } from '../ui'
 import { useDateRange } from '../contexts/DateContext'
 import { usePayments } from '../hooks/usePayments'
-import { useContacts } from '../hooks/useContacts'
 import { useColumnsConfig } from '../hooks/useColumnsConfig'
 import { useToastActions } from '../hooks/useToast'
 import { Icons } from '../icons'
@@ -11,14 +10,28 @@ import { ContactSearch } from '../components/ContactSearch'
 
 export function Payments() {
   const { dateRange } = useDateRange()
-  const { payments, metrics, loading, createPayment, updatePayment, deletePayment } = usePayments({
-    start: dateRange.start,
-    end: dateRange.end
-  })
-  const { contacts } = useContacts({
-    start: new Date('2020-01-01'),
-    end: new Date()
-  })
+  const [viewMode, setViewMode] = useState<'all' | 'filtered'>('filtered')
+
+  const {
+    payments,
+    metrics,
+    loading,
+    totalCount,
+    currentPage,
+    pageSize,
+    totalPages,
+    changePage,
+    changePageSize,
+    createPayment,
+    updatePayment,
+    deletePayment
+  } = usePayments(
+    viewMode === 'all'
+      ? { all: true, page: 1, limit: 50 }
+      : { start: dateRange.start, end: dateRange.end, page: 1, limit: 50 }
+  )
+  // REMOVIDO: No necesitamos cargar todos los contactos aquí
+  // ContactSearch ya maneja sus propios contactos internamente
   const toast = useToastActions()
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<'transactions' | 'subscriptions' | 'installments'>('transactions')
@@ -177,22 +190,22 @@ export function Payments() {
         align: 'center',
         render: (_: any, payment: any) => (
           <div className="flex gap-1">
-            <button 
+            <button
               className="p-1 glass-hover rounded"
               onClick={() => {
                 setEditForm({
+                  contactName: payment.contactName || '',
+                  email: payment.email || '',
                   description: payment.description || '',
                   amount: payment.amount || 0,
-                  status: payment.status || 'pending',
-                  email: payment.email || '',
-                  contactName: payment.contactName || ''
+                  status: payment.status || 'completed'
                 })
                 setEditModal({ isOpen: true, payment })
               }}
             >
               <Icons.edit className="w-4 h-4 text-secondary" />
             </button>
-            <button 
+            <button
               className="p-1 glass-hover rounded"
               onClick={() => setDeleteModal({ isOpen: true, payment })}
             >
@@ -211,26 +224,53 @@ export function Payments() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-primary">Pagos</h1>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                setCreateForm({
-                  contactId: '',
-                  amount: '',
-                  date: new Date().toISOString().split('T')[0],
-                  description: '',
-                  paymentMethod: 'card',
-                  status: 'completed'
-                })
-                setCreateModal({ isOpen: true })
-              }}
-            >
-              <Icons.plus className="w-4 h-4 mr-2" />
-              Registrar/Cobrar
-            </Button>
+            <div className="flex items-center gap-4">
+              {/* Toggle de modo de vista */}
+              <div className="flex items-center gap-2 px-3 py-1.5 glass rounded-lg">
+                <button
+                  className={`px-3 py-1 rounded transition-all ${
+                    viewMode === 'filtered'
+                      ? 'bg-primary text-white'
+                      : 'text-secondary hover:text-primary'
+                  }`}
+                  onClick={() => setViewMode('filtered')}
+                >
+                  <Icons.calendar className="w-4 h-4 inline mr-1" />
+                  Por fecha
+                </button>
+                <button
+                  className={`px-3 py-1 rounded transition-all ${
+                    viewMode === 'all'
+                      ? 'bg-primary text-white'
+                      : 'text-secondary hover:text-primary'
+                  }`}
+                  onClick={() => setViewMode('all')}
+                >
+                  <Icons.folder className="w-4 h-4 inline mr-1" />
+                  Todos
+                </button>
+              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setCreateForm({
+                    contactId: '',
+                    amount: '',
+                    date: new Date().toISOString().split('T')[0],
+                    description: '',
+                    paymentMethod: 'card',
+                    status: 'completed'
+                  })
+                  setCreateModal({ isOpen: true })
+                }}
+              >
+                <Icons.plus className="w-4 h-4 mr-2" />
+                Registrar/Cobrar
+              </Button>
+            </div>
           </div>
-          <DateRangePicker />
+          {viewMode === 'filtered' && <DateRangePicker />}
         </div>
 
         {/* KPI Cards */}
@@ -283,33 +323,47 @@ export function Payments() {
         </div>
 
         {/* Payments Table */}
-        <TableWithControls
-          columns={columns}
-          data={filteredPayments}
-          loading={loading}
-          emptyMessage="No hay pagos registrados para el período seleccionado"
-          searchMessage="No se encontraron pagos"
-          hasSearch={true}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          filters={[
-            {
-              type: 'select',
-              options: [
-                { value: 'transactions', label: 'Transacciones' },
-                { value: 'subscriptions', label: 'Suscripciones' },
-                { value: 'installments', label: 'Cuotas' }
-              ],
-              value: filterType,
-              onChange: setFilterType
-            }
-          ]}
-          onSort={handleSort}
-          sortColumn={sortColumn}
-          sortDirection={sortDirection}
-          onColumnReorder={handleColumnReorder}
-          onColumnVisibilityChange={handleColumnVisibilityChange}
-        />
+        <div className="space-y-0">
+          <TableWithControls
+            columns={columns}
+            data={filteredPayments}
+            loading={loading}
+            emptyMessage="No hay pagos registrados para el período seleccionado"
+            searchMessage="No se encontraron pagos"
+            hasSearch={true}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            filters={[
+              {
+                type: 'select',
+                options: [
+                  { value: 'transactions', label: 'Transacciones' },
+                  { value: 'subscriptions', label: 'Suscripciones' },
+                  { value: 'installments', label: 'Cuotas' }
+                ],
+                value: filterType,
+                onChange: setFilterType
+              }
+            ]}
+            onSort={handleSort}
+            sortColumn={sortColumn}
+            sortDirection={sortDirection}
+            onColumnReorder={handleColumnReorder}
+            onColumnVisibilityChange={handleColumnVisibilityChange}
+          />
+
+          {/* Paginación */}
+          {!loading && totalCount > 0 && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={changePage}
+              pageSize={pageSize}
+              totalItems={totalCount}
+              onPageSizeChange={changePageSize}
+            />
+          )}
+        </div>
       </div>
 
       {/* Modal de confirmación de borrado */}
@@ -429,9 +483,15 @@ export function Payments() {
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Estado</label>
-            <div className="w-full pl-3 pr-3 py-2 glass rounded-lg border border-glassBorder text-primary">
-              {editForm.status || 'pending'}
-            </div>
+            <select
+              className="w-full px-3 py-2 glass rounded-lg border border-glassBorder focus:border-primary focus:outline-none transition-colors"
+              value={editForm.status || 'completed'}
+              onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+            >
+              <option value="completed">Completado</option>
+              <option value="pending">Pendiente</option>
+              <option value="refunded">Reembolsado</option>
+            </select>
           </div>
           <div className="flex gap-2 pt-2 justify-center">
             <Button

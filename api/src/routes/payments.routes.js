@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getPayments, getPaymentMetrics, createPayment, updatePayment, deletePayment } = require('../controllers/payments.controller');
 
+
 // GET /api/payments
 router.get('/', getPayments);
 

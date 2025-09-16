@@ -97,6 +97,160 @@ class PaymentsService {
     }
   }
   
+  async updatePayment(id, updateData) {
+    try {
+      const client = await databasePool.connect();
+
+      try {
+        await client.query('BEGIN');
+
+        // 1. Actualizar campos del pago
+        const paymentFields = [];
+        const paymentValues = [];
+        let fieldIndex = 1;
+
+        if (updateData.description !== undefined) {
+          paymentFields.push(`description = $${fieldIndex++}`);
+          paymentValues.push(updateData.description);
+        }
+        if (updateData.amount !== undefined) {
+          paymentFields.push(`amount = $${fieldIndex++}`);
+          paymentValues.push(Math.abs(updateData.amount));
+        }
+        if (updateData.status !== undefined) {
+          paymentFields.push(`status = $${fieldIndex++}`);
+          paymentValues.push(updateData.status);
+        }
+
+        let updatedPayment = null;
+
+        if (paymentFields.length > 0) {
+          paymentFields.push(`updated_at = $${fieldIndex++}`);
+          paymentValues.push(new Date());
+          paymentValues.push(id);
+
+          const paymentQuery = `
+            UPDATE payments
+            SET ${paymentFields.join(', ')}
+            WHERE id = $${fieldIndex}
+            RETURNING *
+          `;
+
+          const paymentResult = await client.query(paymentQuery, paymentValues);
+          if (paymentResult.rows.length === 0) {
+            throw new Error('Payment not found');
+          }
+          updatedPayment = paymentResult.rows[0];
+        }
+
+        // 2. Si hay campos de contacto, actualizar tabla contacts
+        if (updateData.contactName || updateData.email) {
+          // Obtener el contact_id del pago
+          const getContactIdQuery = `
+            SELECT contact_id FROM payments WHERE id = $1
+          `;
+          const contactIdResult = await client.query(getContactIdQuery, [id]);
+
+          if (contactIdResult.rows.length > 0) {
+            const contactId = contactIdResult.rows[0].contact_id;
+
+            const contactFields = [];
+            const contactValues = [];
+            let contactFieldIndex = 1;
+
+            if (updateData.contactName !== undefined) {
+              contactFields.push(`first_name = $${contactFieldIndex++}`);
+              contactValues.push(updateData.contactName);
+            }
+            if (updateData.email !== undefined) {
+              contactFields.push(`email = $${contactFieldIndex++}`);
+              contactValues.push(updateData.email);
+            }
+
+            if (contactFields.length > 0) {
+              contactFields.push(`updated_at = $${contactFieldIndex++}`);
+              contactValues.push(new Date());
+              contactValues.push(contactId);
+
+              const contactQuery = `
+                UPDATE contacts
+                SET ${contactFields.join(', ')}
+                WHERE contact_id = $${contactFieldIndex}
+              `;
+
+              await client.query(contactQuery, contactValues);
+            }
+          }
+        }
+
+        // 3. Obtener el pago actualizado con información del contacto
+        const finalQuery = `
+          SELECT
+            p.id,
+            p.contact_id,
+            p.amount,
+            p.currency,
+            p.transaction_id,
+            p.payment_method,
+            p.status,
+            p.description,
+            p.invoice_number,
+            p.paid_at,
+            p.created_at,
+            p.updated_at,
+            c.first_name,
+            c.last_name,
+            c.email,
+            c.phone,
+            c.company
+          FROM payments p
+          LEFT JOIN contacts c ON p.contact_id = c.contact_id
+          WHERE p.id = $1
+        `;
+
+        const finalResult = await client.query(finalQuery, [id]);
+
+        if (finalResult.rows.length === 0) {
+          throw new Error('Payment not found');
+        }
+
+        await client.query('COMMIT');
+
+        const row = finalResult.rows[0];
+        return {
+          id: row.id,
+          contactId: row.contact_id,
+          contactName: row.first_name || row.last_name ?
+            `${row.first_name || ''} ${row.last_name || ''}`.trim() :
+            'Sin nombre',
+          email: row.email,
+          phone: row.phone,
+          company: row.company,
+          amount: parseFloat(row.amount),
+          currency: row.currency,
+          transactionId: row.transaction_id,
+          paymentMethod: row.payment_method,
+          status: row.status,
+          description: row.description,
+          invoiceNumber: row.invoice_number,
+          date: row.paid_at || row.created_at,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          type: parseFloat(row.amount) >= 0 ? 'income' : 'expense'
+        };
+
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error('Error updating payment:', error);
+      throw error;
+    }
+  }
+
   async createPayment(paymentData) {
     try {
       // Generar IDs únicos
@@ -186,84 +340,6 @@ class PaymentsService {
     }
   }
 
-  async updatePayment(id, updateData) {
-    try {
-      const fields = [];
-      const values = [];
-      let fieldIndex = 1;
-      
-      // Build dynamic update query for payments table
-      if (updateData.description !== undefined) {
-        fields.push(`description = $${fieldIndex++}`);
-        values.push(updateData.description);
-      }
-      if (updateData.amount !== undefined) {
-        // Always store amount as positive
-        fields.push(`amount = $${fieldIndex++}`);
-        values.push(Math.abs(updateData.amount));
-      }
-      if (updateData.status !== undefined) {
-        fields.push(`status = $${fieldIndex++}`);
-        values.push(updateData.status);
-      }
-      
-      // Update contact info separately if provided
-      if (updateData.email !== undefined || updateData.contactName !== undefined) {
-        const contactUpdateFields = [];
-        const contactValues = [];
-        let contactFieldIndex = 1;
-        
-        if (updateData.contactName !== undefined) {
-          contactUpdateFields.push(`first_name = $${contactFieldIndex++}`);
-          contactValues.push(updateData.contactName);
-        }
-        if (updateData.email !== undefined) {
-          contactUpdateFields.push(`email = $${contactFieldIndex++}`);
-          contactValues.push(updateData.email);
-        }
-        
-        if (contactUpdateFields.length > 0) {
-          contactValues.push(id);
-          const contactQuery = `
-            UPDATE contacts 
-            SET ${contactUpdateFields.join(', ')}
-            WHERE contact_id = (SELECT contact_id FROM payments WHERE id = $${contactFieldIndex})
-          `;
-          await databasePool.query(contactQuery, contactValues);
-        }
-      }
-      
-      if (fields.length === 0 && !updateData.email && !updateData.contactName) {
-        // No updates to make
-        return null;
-      }
-      
-      // Update payment record if there are payment fields to update
-      if (fields.length > 0) {
-        fields.push(`updated_at = $${fieldIndex++}`);
-        values.push(new Date());
-        values.push(id);
-        
-        const query = `
-          UPDATE payments
-          SET ${fields.join(', ')}
-          WHERE id = $${fieldIndex}
-          RETURNING *
-        `;
-        
-        const result = await databasePool.query(query, values);
-        return result.rows[0];
-      }
-      
-      // If only contact info was updated, return the payment record
-      const selectQuery = 'SELECT * FROM payments WHERE id = $1';
-      const result = await databasePool.query(selectQuery, [id]);
-      return result.rows[0];
-    } catch (error) {
-      console.error('Error updating payment:', error);
-      throw error;
-    }
-  }
   
   async deletePayment(id) {
     try {
@@ -364,6 +440,142 @@ class PaymentsService {
       };
     } catch (error) {
       console.error('Error fetching payment metrics:', error);
+      throw error;
+    }
+  }
+  // Nuevo método para obtener pagos con paginación (sin filtro de fecha)
+  async getPaymentsPaginated(offset, limit) {
+    try {
+      const countQuery = `SELECT COUNT(*) as total FROM payments`;
+
+      const dataQuery = `
+        SELECT
+          p.id,
+          p.contact_id,
+          p.amount,
+          p.currency,
+          p.transaction_id,
+          p.payment_method,
+          p.status,
+          p.description,
+          p.invoice_number,
+          COALESCE(p.paid_at, p.created_at) as date,
+          p.created_at,
+          p.updated_at,
+          c.first_name,
+          c.last_name,
+          c.email,
+          c.phone,
+          c.company
+        FROM payments p
+        LEFT JOIN contacts c ON p.contact_id = c.contact_id
+        ORDER BY COALESCE(p.paid_at, p.created_at) DESC
+        LIMIT $1 OFFSET $2
+      `;
+
+      const [countResult, dataResult] = await Promise.all([
+        databasePool.query(countQuery),
+        databasePool.query(dataQuery, [limit, offset])
+      ]);
+
+      const payments = dataResult.rows.map(row => ({
+        id: row.id,
+        contactId: row.contact_id,
+        contactName: row.first_name || row.last_name ?
+          `${row.first_name || ''} ${row.last_name || ''}`.trim() :
+          'Sin nombre',
+        email: row.email,
+        phone: row.phone,
+        company: row.company,
+        amount: parseFloat(row.amount),
+        currency: row.currency,
+        transactionId: row.transaction_id,
+        paymentMethod: row.payment_method || 'unknown',
+        status: row.status,
+        description: row.description,
+        invoiceNumber: row.invoice_number,
+        date: row.date,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+
+      return {
+        payments,
+        total: parseInt(countResult.rows[0].total) || 0
+      };
+    } catch (error) {
+      console.error('Error fetching paginated payments:', error);
+      throw error;
+    }
+  }
+
+  // Nuevo método para obtener pagos con paginación Y filtro de fecha
+  async getPaymentsWithPagination(startDate, endDate, offset, limit) {
+    try {
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM payments
+        WHERE COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2
+      `;
+
+      const dataQuery = `
+        SELECT
+          p.id,
+          p.contact_id,
+          p.amount,
+          p.currency,
+          p.transaction_id,
+          p.payment_method,
+          p.status,
+          p.description,
+          p.invoice_number,
+          COALESCE(p.paid_at, p.created_at) as date,
+          p.created_at,
+          p.updated_at,
+          c.first_name,
+          c.last_name,
+          c.email,
+          c.phone,
+          c.company
+        FROM payments p
+        LEFT JOIN contacts c ON p.contact_id = c.contact_id
+        WHERE COALESCE(p.paid_at, p.created_at) >= $1 AND COALESCE(p.paid_at, p.created_at) <= $2
+        ORDER BY COALESCE(p.paid_at, p.created_at) DESC
+        LIMIT $3 OFFSET $4
+      `;
+
+      const [countResult, dataResult] = await Promise.all([
+        databasePool.query(countQuery, [startDate, endDate]),
+        databasePool.query(dataQuery, [startDate, endDate, limit, offset])
+      ]);
+
+      const payments = dataResult.rows.map(row => ({
+        id: row.id,
+        contactId: row.contact_id,
+        contactName: row.first_name || row.last_name ?
+          `${row.first_name || ''} ${row.last_name || ''}`.trim() :
+          'Sin nombre',
+        email: row.email,
+        phone: row.phone,
+        company: row.company,
+        amount: parseFloat(row.amount),
+        currency: row.currency,
+        transactionId: row.transaction_id,
+        paymentMethod: row.payment_method || 'unknown',
+        status: row.status,
+        description: row.description,
+        invoiceNumber: row.invoice_number,
+        date: row.date,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+
+      return {
+        payments,
+        total: parseInt(countResult.rows[0].total) || 0
+      };
+    } catch (error) {
+      console.error('Error fetching payments with pagination:', error);
       throw error;
     }
   }

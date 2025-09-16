@@ -16,16 +16,16 @@ class ContactsMetricsService {
         WITH contact_stats AS (
           SELECT
             COUNT(DISTINCT c.contact_id) as total_contacts,
-            COUNT(DISTINCT CASE WHEN p.payment_id IS NOT NULL THEN c.contact_id END) as customers,
+            COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN c.contact_id END) as customers,
             COALESCE(SUM(p.amount), 0) as total_ltv,
             CASE
-              WHEN COUNT(DISTINCT CASE WHEN p.payment_id IS NOT NULL THEN c.contact_id END) > 0
-              THEN COALESCE(SUM(p.amount), 0) / COUNT(DISTINCT CASE WHEN p.payment_id IS NOT NULL THEN c.contact_id END)
+              WHEN COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN c.contact_id END) > 0
+              THEN COALESCE(SUM(p.amount), 0) / COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN c.contact_id END)
               ELSE 0
             END as avg_ltv,
             CASE
               WHEN COUNT(DISTINCT c.contact_id) > 0
-              THEN CAST(COUNT(DISTINCT CASE WHEN p.payment_id IS NOT NULL THEN c.contact_id END) AS FLOAT) / COUNT(DISTINCT c.contact_id) * 100
+              THEN CAST(COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN c.contact_id END) AS FLOAT) / COUNT(DISTINCT c.contact_id) * 100
               ELSE 0
             END as conversion_rate
           FROM contacts c

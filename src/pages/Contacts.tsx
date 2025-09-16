@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { PageContainer, TableWithControls, Badge, Button, DateRangePicker, KPICard, TabList, Checkbox, Modal } from '../ui'
+import { PageContainer, TableWithControls, Badge, Button, DateRangePicker, KPICard, TabList, Checkbox, Modal, Pagination } from '../ui'
 import { useDateRange } from '../contexts/DateContext'
 import { useContacts } from '../hooks/useContacts'
 import { useColumnsConfig } from '../hooks/useColumnsConfig'
@@ -10,10 +10,27 @@ import { formatCurrency, formatDate, formatNumber } from '../lib/utils'
 
 export function Contacts() {
   const { dateRange } = useDateRange()
-  const { contacts, metrics, loading, updateContact, deleteContact, bulkDeleteContacts } = useContacts({
-    start: dateRange.start,
-    end: dateRange.end
-  })
+  const [viewMode, setViewMode] = useState<'all' | 'filtered'>('filtered')
+
+  const {
+    contacts,
+    metrics,
+    loading,
+    totalCount,
+    currentPage,
+    pageSize,
+    totalPages,
+    changePage,
+    changePageSize,
+    updateContact,
+    deleteContact,
+    bulkDeleteContacts
+  } = useContacts(
+    viewMode === 'all'
+      ? { all: true, page: 1, limit: 50 }
+      : { start: dateRange.start, end: dateRange.end, page: 1, limit: 50 }
+  )
+
   const toast = useToastActions()
   const [activeTab, setActiveTab] = useState('all')
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set())
@@ -26,6 +43,7 @@ export function Contacts() {
   const [bulkDeleteModal, setBulkDeleteModal] = useState<{ isOpen: boolean }>({ isOpen: false })
   const [editModal, setEditModal] = useState<{ isOpen: boolean; contact: any | null }>({ isOpen: false, contact: null })
   const [editForm, setEditForm] = useState<any>({})
+  const [validationErrors, setValidationErrors] = useState<any>({})
 
   // Tabs con conteo dinámico
   const tabs = [
@@ -117,6 +135,25 @@ export function Contacts() {
   useEffect(() => {
     setSelectedContacts(new Set())
   }, [activeTab, searchQuery])
+
+  // Función de validación
+  const validateForm = () => {
+    const errors: any = {}
+
+    // Nombre requerido
+    if (!editForm.name || editForm.name.trim() === '') {
+      errors.name = 'El nombre es obligatorio'
+    }
+
+    // Validar formato de email si se proporciona (pero no es obligatorio)
+    const hasEmail = editForm.email && editForm.email.trim() !== ''
+    if (hasEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editForm.email)) {
+      errors.email = 'Formato de email inválido'
+    }
+
+    setValidationErrors(errors)
+    return Object.keys(errors).length === 0
+  }
 
   // Configuración de columnas con persistencia
   // Preparar columnas por defecto (estables) — usan row._selected en lugar de cerrar sobre selectedContacts
@@ -243,6 +280,7 @@ export function Contacts() {
                   source: contact.source || '',
                   status: contact.status || 'lead'
                 })
+                setValidationErrors({})
                 setEditModal({ isOpen: true, contact })
               }}
             >
@@ -271,12 +309,39 @@ export function Contacts() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-primary">Contactos</h1>
-            <Button variant="primary" size="sm">
-              <Icons.plus className="w-4 h-4 mr-2" />
-              Nuevo
-            </Button>
+            <div className="flex items-center gap-4">
+              {/* Toggle de modo de vista */}
+              <div className="flex items-center gap-2 px-3 py-1.5 glass rounded-lg">
+                <button
+                  className={`px-3 py-1 rounded transition-all ${
+                    viewMode === 'filtered'
+                      ? 'bg-primary text-white'
+                      : 'text-secondary hover:text-primary'
+                  }`}
+                  onClick={() => setViewMode('filtered')}
+                >
+                  <Icons.calendar className="w-4 h-4 inline mr-1" />
+                  Por fecha
+                </button>
+                <button
+                  className={`px-3 py-1 rounded transition-all ${
+                    viewMode === 'all'
+                      ? 'bg-primary text-white'
+                      : 'text-secondary hover:text-primary'
+                  }`}
+                  onClick={() => setViewMode('all')}
+                >
+                  <Icons.folder className="w-4 h-4 inline mr-1" />
+                  Todos
+                </button>
+              </div>
+              <Button variant="primary" size="sm">
+                <Icons.plus className="w-4 h-4 mr-2" />
+                Nuevo
+              </Button>
+            </div>
           </div>
-          <DateRangePicker />
+          {viewMode === 'filtered' && <DateRangePicker />}
         </div>
 
         {/* KPI Cards */}
@@ -351,29 +416,43 @@ export function Contacts() {
         )}
 
         {/* Contacts Table */}
-        <TableWithControls
-          columns={columns}
-          data={filteredContacts.map(c => ({ ...c, _selected: selectedContacts.has(c.id) }))}
-          loading={loading}
-          emptyMessage="No hay contactos para el período seleccionado"
-          searchMessage="No se encontraron contactos"
-          hasSearch={true}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          filters={[
-            {
-              type: 'select',
-              options: tabs.map(tab => ({ value: tab.id, label: `${tab.label} (${tab.count})` })),
-              value: activeTab,
-              onChange: setActiveTab
-            }
-          ]}
-          onSort={handleSort}
-          sortColumn={sortColumn}
-          sortDirection={sortDirection}
-          onColumnReorder={handleColumnReorder}
-          onColumnVisibilityChange={handleColumnVisibilityChange}
-        />
+        <div className="space-y-0">
+          <TableWithControls
+            columns={columns}
+            data={filteredContacts.map(c => ({ ...c, _selected: selectedContacts.has(c.id) }))}
+            loading={loading}
+            emptyMessage="No hay contactos para el período seleccionado"
+            searchMessage="No se encontraron contactos"
+            hasSearch={true}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            filters={[
+              {
+                type: 'select',
+                options: tabs.map(tab => ({ value: tab.id, label: `${tab.label} (${tab.count})` })),
+                value: activeTab,
+                onChange: setActiveTab
+              }
+            ]}
+            onSort={handleSort}
+            sortColumn={sortColumn}
+            sortDirection={sortDirection}
+            onColumnReorder={handleColumnReorder}
+            onColumnVisibilityChange={handleColumnVisibilityChange}
+          />
+
+          {/* Paginación */}
+          {!loading && totalCount > 0 && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={changePage}
+              pageSize={pageSize}
+              totalItems={totalCount}
+              onPageSizeChange={changePageSize}
+            />
+          )}
+        </div>
       </div>
 
       {/* Modal de confirmación de borrado */}
@@ -425,38 +504,70 @@ export function Contacts() {
       {/* Modal de edición */}
       <Modal
         isOpen={editModal.isOpen}
-        onClose={() => setEditModal({ isOpen: false, contact: null })}
+        onClose={() => {
+          setEditModal({ isOpen: false, contact: null })
+          setEditForm({})
+          setValidationErrors({})
+        }}
         title="Editar contacto"
         icon={<Icons.edit className="w-5 h-5 text-primary" />}
         size="md"
       >
         <div className="space-y-4">
+
+          {/* Nombre */}
           <div>
-            <label className="block text-sm font-medium text-secondary mb-2">Nombre</label>
+            <label className="block text-sm font-medium text-secondary mb-2">
+              Nombre <span className="text-error">*</span>
+            </label>
             <div className="relative">
               {Icons.user && <Icons.user className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary z-10 pointer-events-none" />}
               <input
                 type="text"
-                className="w-full pl-10 pr-3 py-2 glass rounded-lg border border-glassBorder focus:border-primary focus:outline-none transition-colors"
+                className={`w-full pl-10 pr-3 py-2 glass rounded-lg border transition-colors ${
+                  validationErrors.name ? 'border-error focus:border-error' : 'border-glassBorder focus:border-primary'
+                } focus:outline-none`}
                 value={editForm.name || ''}
-                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                onChange={(e) => {
+                  setEditForm({ ...editForm, name: e.target.value })
+                  if (validationErrors.name) {
+                    setValidationErrors({ ...validationErrors, name: undefined })
+                  }
+                }}
                 placeholder="Nombre del contacto"
               />
+              {validationErrors.name && (
+                <p className="text-sm text-error mt-1">{validationErrors.name}</p>
+              )}
             </div>
           </div>
+
+          {/* Email */}
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Email</label>
             <div className="relative">
               {Icons.send && <Icons.send className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary z-10 pointer-events-none" />}
               <input
                 type="email"
-                className="w-full pl-10 pr-3 py-2 glass rounded-lg border border-glassBorder focus:border-primary focus:outline-none transition-colors"
+                className={`w-full pl-10 pr-3 py-2 glass rounded-lg border transition-colors ${
+                  validationErrors.email ? 'border-error focus:border-error' : 'border-glassBorder focus:border-primary'
+                } focus:outline-none`}
                 value={editForm.email || ''}
-                onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                onChange={(e) => {
+                  setEditForm({ ...editForm, email: e.target.value })
+                  if (validationErrors.email) {
+                    setValidationErrors({ ...validationErrors, email: undefined })
+                  }
+                }}
                 placeholder="correo@ejemplo.com"
               />
+              {validationErrors.email && (
+                <p className="text-sm text-error mt-1">{validationErrors.email}</p>
+              )}
             </div>
           </div>
+
+          {/* Teléfono */}
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Teléfono</label>
             <div className="relative">
@@ -470,6 +581,8 @@ export function Contacts() {
               />
             </div>
           </div>
+
+          {/* Empresa */}
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Empresa</label>
             <div className="relative">
@@ -483,6 +596,8 @@ export function Contacts() {
               />
             </div>
           </div>
+
+          {/* Fuente */}
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Fuente</label>
             <div className="relative">
@@ -496,21 +611,52 @@ export function Contacts() {
               />
             </div>
           </div>
+
+          {/* Estado (ahora editable) */}
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Estado</label>
-            <div className="w-full pl-3 pr-3 py-2 glass rounded-lg border border-glassBorder text-primary">
-              {editForm.status || 'lead'}
+            <div className="relative">
+              {Icons.userCheck && <Icons.userCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary z-10 pointer-events-none" />}
+              <select
+                className="w-full pl-10 pr-3 py-2 glass rounded-lg border border-glassBorder focus:border-primary focus:outline-none transition-colors appearance-none bg-transparent cursor-pointer"
+                value={editForm.status || 'lead'}
+                onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+              >
+                <option value="lead" className="bg-surface text-primary">Lead</option>
+                <option value="appointment" className="bg-surface text-primary">Con cita</option>
+                <option value="client" className="bg-surface text-primary">Cliente</option>
+              </select>
+              <Icons.chevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary pointer-events-none" />
             </div>
           </div>
+
+          {/* Botones */}
           <div className="flex gap-2 pt-2 justify-center">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => {
+                setEditModal({ isOpen: false, contact: null })
+                setEditForm({})
+                setValidationErrors({})
+              }}
+            >
+              Cancelar
+            </Button>
             <Button
               variant="primary"
               size="sm"
               onClick={async () => {
+                if (!validateForm()) {
+                  return
+                }
+
                 if (editModal.contact) {
                   try {
                     await updateContact(editModal.contact.id, editForm)
                     setEditModal({ isOpen: false, contact: null })
+                    setEditForm({})
+                    setValidationErrors({})
                     toast.success('Contacto actualizado', 'Los cambios se han guardado correctamente')
                   } catch (error) {
                     console.error('Error al actualizar:', error)

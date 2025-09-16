@@ -62,7 +62,10 @@ class ContactsService {
       
       return result.rows.map(row => ({
         id: row.contact_id,
-        name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Sin nombre',
+        // CORREGIDO: Usar lógica inteligente para nombres
+        name: row.first_name ?
+          (row.last_name ? `${row.first_name} ${row.last_name}`.trim() : row.first_name)
+          : 'Sin nombre',
         email: row.email,
         phone: row.phone,
         company: row.company,
@@ -129,7 +132,10 @@ class ContactsService {
       const newContact = result.rows[0];
       return {
         id: newContact.contact_id,
-        name: `${newContact.first_name || ''} ${newContact.last_name || ''}`.trim() || 'Sin nombre',
+        // CORREGIDO: Usar lógica inteligente para nombres
+        name: newContact.first_name ?
+          (newContact.last_name ? `${newContact.first_name} ${newContact.last_name}`.trim() : newContact.first_name)
+          : 'Sin nombre',
         email: newContact.email,
         phone: newContact.phone,
         company: newContact.company,
@@ -149,23 +155,35 @@ class ContactsService {
       const fields = [];
       const values = [];
       let fieldIndex = 1;
-      
+
       // Build dynamic update query
       if (updateData.name !== undefined) {
+        // Manejar campo name unificado - guardar TODO en first_name
         fields.push(`first_name = $${fieldIndex++}`);
         values.push(updateData.name);
+        // OBLIGATORIO: Limpiar last_name para evitar duplicación
+        fields.push(`last_name = $${fieldIndex++}`);
+        values.push('');
+      }
+      if (updateData.firstName !== undefined) {
+        fields.push(`first_name = $${fieldIndex++}`);
+        values.push(updateData.firstName);
+      }
+      if (updateData.lastName !== undefined) {
+        fields.push(`last_name = $${fieldIndex++}`);
+        values.push(updateData.lastName);
       }
       if (updateData.email !== undefined) {
         fields.push(`email = $${fieldIndex++}`);
-        values.push(updateData.email);
+        values.push(updateData.email || null);
       }
       if (updateData.phone !== undefined) {
         fields.push(`phone = $${fieldIndex++}`);
-        values.push(updateData.phone);
+        values.push(updateData.phone || null);
       }
       if (updateData.company !== undefined) {
         fields.push(`company = $${fieldIndex++}`);
-        values.push(updateData.company);
+        values.push(updateData.company || null);
       }
       if (updateData.source !== undefined) {
         fields.push(`source = $${fieldIndex++}`);
@@ -175,24 +193,42 @@ class ContactsService {
         fields.push(`status = $${fieldIndex++}`);
         values.push(updateData.status);
       }
-      
+
       if (fields.length === 0) {
         return null;
       }
-      
+
       fields.push(`updated_at = $${fieldIndex++}`);
       values.push(new Date());
       values.push(id);
-      
+
       const query = `
         UPDATE contacts
         SET ${fields.join(', ')}
         WHERE contact_id = $${fieldIndex}
         RETURNING *
       `;
-      
+
       const result = await databasePool.query(query, values);
-      return result.rows[0];
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      // Retornar en formato esperado por frontend
+      const updatedContact = result.rows[0];
+      return {
+        id: updatedContact.contact_id,
+        // CORREGIDO: Para ediciones con name, usar solo first_name
+        name: updatedContact.first_name || 'Sin nombre',
+        email: updatedContact.email,
+        phone: updatedContact.phone,
+        company: updatedContact.company,
+        status: updatedContact.status,
+        source: updatedContact.source,
+        createdAt: updatedContact.created_at,
+        updatedAt: updatedContact.updated_at
+      };
     } catch (error) {
       console.error('Error updating contact:', error);
       throw error;
@@ -263,7 +299,7 @@ class ContactsService {
         FROM contacts
         WHERE created_at >= $1 AND created_at <= $2
       `;
-      
+
       // Contacts with appointments
       const appointmentsQuery = `
         SELECT COUNT(DISTINCT c.contact_id) as with_appointments
@@ -271,36 +307,36 @@ class ContactsService {
         INNER JOIN appointments a ON c.contact_id = a.contact_id
         WHERE c.created_at >= $1 AND c.created_at <= $2
       `;
-      
+
       // Customers (contacts with completed payments)
       const customersQuery = `
-        SELECT 
+        SELECT
           COUNT(DISTINCT c.contact_id) as customers,
-          (SELECT COALESCE(SUM(p2.amount), 0) 
-           FROM payments p2 
+          (SELECT COALESCE(SUM(p2.amount), 0)
+           FROM payments p2
            INNER JOIN contacts c2 ON p2.contact_id = c2.contact_id
            WHERE c2.created_at >= $1 AND c2.created_at <= $2
            AND p2.status = 'completed') as total_ltv
         FROM contacts c
         WHERE c.created_at >= $1 AND c.created_at <= $2
         AND EXISTS (
-          SELECT 1 FROM payments p 
-          WHERE p.contact_id = c.contact_id 
+          SELECT 1 FROM payments p
+          WHERE p.contact_id = c.contact_id
           AND p.status = 'completed'
         )
       `;
-      
+
       const [total, appointments, customers] = await Promise.all([
         databasePool.query(totalQuery, [startDate, endDate]),
         databasePool.query(appointmentsQuery, [startDate, endDate]),
         databasePool.query(customersQuery, [startDate, endDate])
       ]);
-      
+
       const totalContacts = parseInt(total.rows[0].total) || 0;
       const withAppointments = parseInt(appointments.rows[0].with_appointments) || 0;
       const customerCount = parseInt(customers.rows[0].customers) || 0;
       const totalLTV = parseFloat(customers.rows[0].total_ltv) || 0;
-      
+
       return {
         total: totalContacts,
         withAppointments: withAppointments,
@@ -312,6 +348,133 @@ class ContactsService {
       };
     } catch (error) {
       console.error('Error fetching contact metrics:', error);
+      throw error;
+    }
+  }
+
+  // Nuevo método para obtener contactos con paginación (sin filtro de fecha)
+  async getContactsPaginated(offset, limit) {
+    try {
+      const countQuery = `SELECT COUNT(*) as total FROM contacts`;
+
+      const dataQuery = `
+        SELECT
+          c.contact_id,
+          c.first_name,
+          c.last_name,
+          c.email,
+          c.phone,
+          c.company,
+          c.attribution_ad_id,
+          c.ext_crm_id,
+          c.status,
+          c.source,
+          c.created_at,
+          c.updated_at,
+          (SELECT COUNT(*) FROM appointments a WHERE a.contact_id = c.contact_id) as appointment_count,
+          (SELECT COUNT(*) FROM payments p WHERE p.contact_id = c.contact_id AND p.status = 'completed') as payment_count,
+          (SELECT COALESCE(SUM(p2.amount), 0) FROM payments p2 WHERE p2.contact_id = c.contact_id AND p2.status = 'completed') as ltv
+        FROM contacts c
+        ORDER BY c.created_at DESC
+        LIMIT $1 OFFSET $2
+      `;
+
+      const [countResult, dataResult] = await Promise.all([
+        databasePool.query(countQuery),
+        databasePool.query(dataQuery, [limit, offset])
+      ]);
+
+      const contacts = dataResult.rows.map(row => ({
+        id: row.contact_id,
+        name: row.first_name ?
+          (row.last_name ? `${row.first_name} ${row.last_name}`.trim() : row.first_name)
+          : 'Sin nombre',
+        email: row.email,
+        phone: row.phone,
+        company: row.company,
+        attributionAdId: row.attribution_ad_id,
+        ghlId: row.ext_crm_id,
+        status: row.payment_count > 0 ? 'client' : row.appointment_count > 0 ? 'appointment' : 'lead',
+        source: row.source || 'Direct',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        appointments: parseInt(row.appointment_count) || 0,
+        payments: parseInt(row.payment_count) || 0,
+        ltv: parseFloat(row.ltv) || 0
+      }));
+
+      return {
+        contacts,
+        total: parseInt(countResult.rows[0].total) || 0
+      };
+    } catch (error) {
+      console.error('Error fetching paginated contacts:', error);
+      throw error;
+    }
+  }
+
+  // Nuevo método para obtener contactos con paginación Y filtro de fecha
+  async getContactsWithPagination(startDate, endDate, offset, limit) {
+    try {
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM contacts
+        WHERE created_at >= $1 AND created_at <= $2
+      `;
+
+      const dataQuery = `
+        SELECT
+          c.contact_id,
+          c.first_name,
+          c.last_name,
+          c.email,
+          c.phone,
+          c.company,
+          c.attribution_ad_id,
+          c.ext_crm_id,
+          c.status,
+          c.source,
+          c.created_at,
+          c.updated_at,
+          (SELECT COUNT(*) FROM appointments a WHERE a.contact_id = c.contact_id) as appointment_count,
+          (SELECT COUNT(*) FROM payments p WHERE p.contact_id = c.contact_id AND p.status = 'completed') as payment_count,
+          (SELECT COALESCE(SUM(p2.amount), 0) FROM payments p2 WHERE p2.contact_id = c.contact_id AND p2.status = 'completed') as ltv
+        FROM contacts c
+        WHERE c.created_at >= $1 AND c.created_at <= $2
+        ORDER BY c.created_at DESC
+        LIMIT $3 OFFSET $4
+      `;
+
+      const [countResult, dataResult] = await Promise.all([
+        databasePool.query(countQuery, [startDate, endDate]),
+        databasePool.query(dataQuery, [startDate, endDate, limit, offset])
+      ]);
+
+      const contacts = dataResult.rows.map(row => ({
+        id: row.contact_id,
+        name: row.first_name ?
+          (row.last_name ? `${row.first_name} ${row.last_name}`.trim() : row.first_name)
+          : 'Sin nombre',
+        email: row.email,
+        phone: row.phone,
+        company: row.company,
+        attributionAdId: row.attribution_ad_id,
+        ghlId: row.ext_crm_id,
+        status: row.payment_count > 0 ? 'client' : row.appointment_count > 0 ? 'appointment' : 'lead',
+        source: row.source || 'Direct',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        appointments: parseInt(row.appointment_count) || 0,
+        payments: parseInt(row.payment_count) || 0,
+        ltv: parseFloat(row.ltv) || 0
+      }));
+
+      return {
+        contacts,
+        total: parseInt(countResult.rows[0].total) || 0
+      };
+    } catch (error) {
+      console.error('Error fetching contacts with pagination:', error);
       throw error;
     }
   }

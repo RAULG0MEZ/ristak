@@ -345,13 +345,17 @@ router.get('/snip.js', (req, res) => {
   const accountId = req.query.a || process.env.ACCOUNT_ID;
   const subaccountId = req.query.s || process.env.DEFAULT_SUBACCOUNT_ID;
 
+  // Detectar protocolo correcto (considera proxy reverso)
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.get('host');
+
   const script = `
 (function() {
   // Configuración
   var config = {
     accountId: '${accountId}',
     subaccountId: '${subaccountId}',
-    collectorUrl: '${req.protocol}://${req.get('host')}/api/tracking/collect'
+    collectorUrl: '${protocol}://${host}/api/tracking/collect'
   };
 
   // Función para enviar pageview

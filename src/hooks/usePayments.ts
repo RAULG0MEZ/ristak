@@ -46,45 +46,108 @@ interface DateRange {
   end: Date;
 }
 
-export function usePayments({ start, end }: DateRange) {
+interface UsePaymentsOptions {
+  start?: Date;
+  end?: Date;
+  page?: number;
+  limit?: number;
+  all?: boolean;
+}
+
+interface PaginatedResponse {
+  data: Payment[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export function usePayments(options: UsePaymentsOptions = {}) {
+  const {
+    start,
+    end,
+    page = 1,
+    limit = 50,
+    all = false
+  } = options;
+
   const [payments, setPayments] = useState<Payment[]>([]);
   const [metrics, setMetrics] = useState<PaymentMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(page);
+  const [pageSize, setPageSize] = useState(limit);
+  const [totalPages, setTotalPages] = useState(0);
 
-  const fetchPayments = async () => {
+  const fetchPayments = async (fetchPage?: number, fetchLimit?: number) => {
     try {
       setLoading(true);
       setError(null);
-      
-      const [paymentsRes, metricsRes] = await Promise.all([
-        fetch(
-          getApiUrl(`/payments?start=${start.toISOString()}&end=${end.toISOString()}`)
-        ),
-        fetch(
-          getApiUrl(`/payments/metrics?start=${start.toISOString()}&end=${end.toISOString()}`)
-        )
-      ]);
 
-      if (!paymentsRes.ok || !metricsRes.ok) {
+      const actualPage = fetchPage || currentPage;
+      const actualLimit = fetchLimit || pageSize;
+
+      let paymentsUrl: string;
+      let metricsUrl: string | null = null;
+
+      if (all) {
+        // Fetch all payments with pagination
+        paymentsUrl = getApiUrl(`/payments?all=true&page=${actualPage}&limit=${actualLimit}`);
+        // No metrics for all mode
+      } else if (start && end) {
+        // Fetch with date filter
+        paymentsUrl = getApiUrl(`/payments?start=${start.toISOString()}&end=${end.toISOString()}&page=${actualPage}&limit=${actualLimit}`);
+        metricsUrl = getApiUrl(`/payments/metrics?start=${start.toISOString()}&end=${end.toISOString()}`);
+      } else {
+        // No data to fetch
+        setPayments([]);
+        setTotalCount(0);
+        setTotalPages(0);
+        setLoading(false);
+        return;
+      }
+
+      const promises: Promise<Response>[] = [fetch(paymentsUrl)];
+      if (metricsUrl) {
+        promises.push(fetch(metricsUrl));
+      }
+
+      const responses = await Promise.all(promises);
+      const paymentsRes = responses[0];
+      const metricsRes = responses[1];
+
+      if (!paymentsRes.ok || (metricsRes && !metricsRes.ok)) {
         throw new Error('Failed to fetch payments data');
       }
 
-      const paymentsData = await paymentsRes.json();
-      const metricsData = await metricsRes.json();
+      const paymentsData: PaginatedResponse = await paymentsRes.json();
+      const metricsData = metricsRes ? await metricsRes.json() : null;
 
       setPayments(paymentsData.data || []);
-      setMetrics(metricsData.data || null);
+      setTotalCount(paymentsData.total || 0);
+      setCurrentPage(paymentsData.page || actualPage);
+      setPageSize(paymentsData.limit || actualLimit);
+      setTotalPages(paymentsData.totalPages || 0);
+
+      if (metricsData) {
+        setMetrics(metricsData.data || null);
+      }
     } catch (err) {
       console.error('Error fetching payments:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
-      // Set empty data on error
-      setPayments([]);
-      setMetrics(null);
+      // NO resetear datos en error - mantener datos existentes
+      // Solo resetear si es la primera carga y no hay datos
+      if (payments.length === 0 && !metrics) {
+        setPayments([]);
+        setMetrics(null);
+      }
     } finally {
       setLoading(false);
     }
   };
+
 
   const updatePayment = async (id: string, data: Partial<Payment>) => {
     try {
@@ -98,7 +161,7 @@ export function usePayments({ start, end }: DateRange) {
 
       // Refrescar la lista de pagos
       await fetchPayments();
-      return true;
+      return (await response.json()).data;
     } catch (error) {
       console.error('Error updating payment:', error);
       throw error;
@@ -151,16 +214,53 @@ export function usePayments({ start, end }: DateRange) {
     }
   };
 
+  const changePage = (newPage: number) => {
+    setCurrentPage(newPage);
+    fetchPayments(newPage, pageSize);
+  };
+
+  const changePageSize = (newSize: number) => {
+    setPageSize(newSize);
+    setCurrentPage(1); // Reset to first page when changing size
+    fetchPayments(1, newSize);
+  };
+
   useEffect(() => {
     fetchPayments();
-  }, [start, end]);
+  }, [start, end, all]);
+
+  // Reintento automático en caso de error
+  useEffect(() => {
+    if (error && retryCount < 3) {
+      const timer = setTimeout(() => {
+        console.log(`Reintentando carga de pagos (intento ${retryCount + 1}/3)...`);
+        setRetryCount(prev => prev + 1);
+        fetchPayments();
+      }, 2000 * (retryCount + 1)); // Backoff exponencial: 2s, 4s, 6s
+
+      return () => clearTimeout(timer);
+    }
+  }, [error, retryCount]);
+
+  // Reset retry count cuando los datos se cargan exitosamente
+  useEffect(() => {
+    if (payments.length > 0 || metrics) {
+      setRetryCount(0);
+    }
+  }, [payments, metrics]);
 
   return {
     payments,
     metrics,
     loading,
     error,
+    totalCount,
+    currentPage,
+    pageSize,
+    totalPages,
     refetch: fetchPayments,
+    changePage,
+    changePageSize,
     createPayment,
     updatePayment,
     deletePayment

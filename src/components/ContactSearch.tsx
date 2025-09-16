@@ -4,7 +4,7 @@ import { useContacts } from '../hooks/useContacts';
 
 interface ContactSearchProps {
   value: string | null;
-  onChange: (contactId: string | null, contactData?: any) => void;
+  onChange: (contactId: string | null) => void;
   className?: string;
 }
 
@@ -26,7 +26,7 @@ export function ContactSearch({ value, onChange, className = '' }: ContactSearch
   // Get contacts from the current date range
   const today = new Date();
   const thirtyDaysAgo = new Date(today);
-  thirtyDaysAgo.setDate(today.getDate() - 365); // Get last year of contacts for search
+  thirtyDaysAgo.setDate(today.getDate() - 90); // Solo últimos 3 meses para mejor performance
 
   const { contacts, createContact } = useContacts({
     start: thirtyDaysAgo,
@@ -78,19 +78,14 @@ export function ContactSearch({ value, onChange, className = '' }: ContactSearch
 
   const handleSelectContact = (contact: any) => {
     setSelectedContact(contact);
-    onChange(contact.id, contact);
+    onChange(contact.id);
     setSearchTerm('');
     setIsOpen(false);
     setShowCreateForm(false);
   };
 
   const handleCreateContact = async () => {
-    // Validate that at least email or phone is provided
-    if (!newContactForm.email && !newContactForm.phone) {
-      console.error('Error de validación: Debes proporcionar email o teléfono');
-      return;
-    }
-
+    // Solo validar que el nombre no esté vacío
     if (!newContactForm.name.trim()) {
       console.error('Error de validación: El nombre es requerido');
       return;
@@ -252,7 +247,7 @@ export function ContactSearch({ value, onChange, className = '' }: ContactSearch
                   </div>
 
                   <div className="text-xs text-tertiary">
-                    * Se requiere al menos email o teléfono
+                    * Solo el nombre es obligatorio
                   </div>
 
                   <div className="flex gap-2 pt-2">

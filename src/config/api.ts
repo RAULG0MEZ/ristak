@@ -10,24 +10,26 @@ const isProduction = import.meta.env.PROD
 
 // Por defecto usar rutas relativas (funcionará con el proxy de Vite)
 // Si se especifica VITE_API_URL, usarla (para desarrollo con servidores separados)
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
 // Si estamos en producción y no hay VITE_API_URL, usar ruta relativa
-export const API_URL = isProduction && !import.meta.env.VITE_API_URL 
-  ? '/api' 
+export const API_URL = isProduction && !import.meta.env.VITE_API_URL
+  ? '/api'
   : API_BASE
 
 // Función helper para construir URLs de API
 export function getApiUrl(endpoint: string): string {
   // Asegurar que el endpoint empiece con /
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
-  
-  // Si API_URL ya incluye /api, no duplicarlo
-  if (API_URL.endsWith('/api') && cleanEndpoint.startsWith('/api')) {
-    return `${API_URL}${cleanEndpoint.slice(4)}`
+
+  // Si tenemos VITE_API_URL configurado, usarlo directamente
+  if (import.meta.env.VITE_API_URL) {
+    // VITE_API_URL ya incluye /api al final (ej: http://localhost:3002/api)
+    return `${import.meta.env.VITE_API_URL}${cleanEndpoint}`
   }
-  
-  return `${API_URL}${cleanEndpoint}`
+
+  // Si no hay VITE_API_URL, usar proxy local
+  return `/api${cleanEndpoint}`
 }
 
 // Configuración específica para Meta OAuth

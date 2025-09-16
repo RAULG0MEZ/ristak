@@ -101,9 +101,12 @@ class MetaService {
       return `${apiBaseUrl}/meta/oauth/callback`
     }
     
-    // Fallback to localhost with configurable port
+    // Fallback basado en el entorno
     const port = process.env.API_PORT || 3002
-    return `http://localhost:${port}/api/meta/oauth/callback`
+    const host = process.env.NODE_ENV === 'production'
+      ? process.env.TRACK_HOST || 'https://app.hollytrack.com'
+      : `http://localhost:${port}`
+    return `${host}/api/meta/oauth/callback`
   }
 
   getLoginUrl(state) {

@@ -17,21 +17,35 @@ const configRoutes = require('./routes/config.routes');
 const trackingRoutes = require('./routes/tracking.routes');
 
 const app = express();
-const PORT = process.env.API_PORT || 5001; // PUERTO DEFINITIVO API: 5001
+const PORT = process.env.API_PORT || 3002;
 
 // Middleware configuration
 app.use(cors({
   origin: function (origin, callback) {
-    // Lista de orígenes permitidos
-    const allowedOrigins = [
-      'http://localhost:5173', // PUERTO DEFINITIVO FRONTEND (Vite default)
-      'http://localhost:5001', // PUERTO DEFINITIVO API
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:5001',
-      'https://app.hollytrack.com',
-      'https://hollytrack.com'
-    ];
-    
+    // Construir lista de orígenes permitidos dinámicamente
+    const allowedOrigins = [];
+
+    // Agregar orígenes de desarrollo
+    if (process.env.NODE_ENV !== 'production') {
+      const frontendPort = process.env.VITE_PORT || '5173';
+      const apiPort = process.env.API_PORT || '3002';
+      allowedOrigins.push(
+        `http://localhost:${frontendPort}`,
+        `http://127.0.0.1:${frontendPort}`,
+        `http://localhost:${apiPort}`,
+        `http://127.0.0.1:${apiPort}`
+      );
+    }
+
+    // Agregar hosts permitidos desde variables de entorno
+    if (process.env.ALLOWED_HOSTS) {
+      const hosts = process.env.ALLOWED_HOSTS.split(',');
+      hosts.forEach(host => {
+        allowedOrigins.push(`https://${host.trim()}`);
+        allowedOrigins.push(`http://${host.trim()}`);
+      });
+    }
+
     // Permitir si no hay origen (Postman, curl) o si está en la lista
     // También permitir 'null' para archivos HTML abiertos directamente
     if (!origin || origin === 'null' || allowedOrigins.includes(origin)) {
@@ -49,6 +63,7 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 204
 }));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 

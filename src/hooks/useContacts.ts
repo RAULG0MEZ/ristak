@@ -33,41 +33,102 @@ interface DateRange {
   end: Date;
 }
 
-export function useContacts({ start, end }: DateRange) {
+interface UseContactsOptions {
+  start?: Date;
+  end?: Date;
+  page?: number;
+  limit?: number;
+  all?: boolean;
+}
+
+interface PaginatedResponse {
+  data: Contact[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export function useContacts(options: UseContactsOptions = {}) {
+  const {
+    start,
+    end,
+    page = 1,
+    limit = 50,
+    all = false
+  } = options;
+
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [metrics, setMetrics] = useState<ContactMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(page);
+  const [pageSize, setPageSize] = useState(limit);
+  const [totalPages, setTotalPages] = useState(0);
 
-  const fetchContacts = async () => {
+  const fetchContacts = async (fetchPage?: number, fetchLimit?: number) => {
     try {
       setLoading(true);
       setError(null);
-      
-      const [contactsRes, metricsRes] = await Promise.all([
-        fetch(
-          getApiUrl(`/contacts?start=${start.toISOString()}&end=${end.toISOString()}`)
-        ),
-        fetch(
-          getApiUrl(`/contacts/metrics?start=${start.toISOString()}&end=${end.toISOString()}`)
-        )
-      ]);
 
-      if (!contactsRes.ok || !metricsRes.ok) {
+      const actualPage = fetchPage || currentPage;
+      const actualLimit = fetchLimit || pageSize;
+
+      let contactsUrl: string;
+      let metricsUrl: string | null = null;
+
+      if (all) {
+        // Fetch all contacts with pagination
+        contactsUrl = getApiUrl(`/contacts?all=true&page=${actualPage}&limit=${actualLimit}`);
+        // No metrics for all mode
+      } else if (start && end) {
+        // Fetch with date filter
+        contactsUrl = getApiUrl(`/contacts?start=${start.toISOString()}&end=${end.toISOString()}&page=${actualPage}&limit=${actualLimit}`);
+        metricsUrl = getApiUrl(`/contacts/metrics?start=${start.toISOString()}&end=${end.toISOString()}`);
+      } else {
+        // No data to fetch
+        setContacts([]);
+        setTotalCount(0);
+        setTotalPages(0);
+        setLoading(false);
+        return;
+      }
+
+      const promises: Promise<Response>[] = [fetch(contactsUrl)];
+      if (metricsUrl) {
+        promises.push(fetch(metricsUrl));
+      }
+
+      const responses = await Promise.all(promises);
+      const contactsRes = responses[0];
+      const metricsRes = responses[1];
+
+      if (!contactsRes.ok || (metricsRes && !metricsRes.ok)) {
         throw new Error('Failed to fetch contacts data');
       }
 
-      const contactsData = await contactsRes.json();
-      const metricsData = await metricsRes.json();
+      const contactsData: PaginatedResponse = await contactsRes.json();
+      const metricsData = metricsRes ? await metricsRes.json() : null;
 
       setContacts(contactsData.data || []);
-      setMetrics(metricsData.data || null);
+      setTotalCount(contactsData.total || 0);
+      setCurrentPage(contactsData.page || actualPage);
+      setPageSize(contactsData.limit || actualLimit);
+      setTotalPages(contactsData.totalPages || 0);
+
+      if (metricsData) {
+        setMetrics(metricsData.data || null);
+      }
     } catch (err) {
       console.error('Error fetching contacts:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
-      // Set empty data on error
-      setContacts([]);
-      setMetrics(null);
+      // NO resetear datos en error - mantener datos existentes
+      // Solo resetear si es la primera carga y no hay datos
+      if (contacts.length === 0 && !metrics) {
+        setContacts([]);
+        setMetrics(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -106,11 +167,24 @@ export function useContacts({ start, end }: DateRange) {
         body: JSON.stringify(data)
       });
 
-      if (!response.ok) throw new Error('Failed to update contact');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || errorData.message || 'Error al actualizar contacto';
+        throw new Error(errorMessage);
+      }
 
-      // Refrescar la lista de contactos
-      await fetchContacts();
-      return true;
+      const result = await response.json();
+
+      // Actualizar el contacto en la lista local sin refrescar todo
+      setContacts(prevContacts =>
+        prevContacts.map(contact =>
+          contact.id === id
+            ? { ...contact, ...result.data }
+            : contact
+        )
+      );
+
+      return result.data;
     } catch (error) {
       console.error('Error updating contact:', error);
       throw error;
@@ -155,16 +229,33 @@ export function useContacts({ start, end }: DateRange) {
     }
   };
 
+  const changePage = (newPage: number) => {
+    setCurrentPage(newPage);
+    fetchContacts(newPage, pageSize);
+  };
+
+  const changePageSize = (newSize: number) => {
+    setPageSize(newSize);
+    setCurrentPage(1); // Reset to first page when changing size
+    fetchContacts(1, newSize);
+  };
+
   useEffect(() => {
     fetchContacts();
-  }, [start, end]);
+  }, [start, end, all]);
 
   return {
     contacts,
     metrics,
     loading,
     error,
+    totalCount,
+    currentPage,
+    pageSize,
+    totalPages,
     refetch: fetchContacts,
+    changePage,
+    changePageSize,
     createContact,
     updateContact,
     deleteContact,

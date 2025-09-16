@@ -3,24 +3,49 @@ const paymentsMetricsService = require('../services/payments.metrics.service');
 
 async function getPayments(req, res) {
   try {
-    const { start, end } = req.query;
-    
-    if (!start || !end) {
-      return res.status(400).json({
-        error: 'Start and end dates are required'
+    const { start, end, page = 1, limit = 50, all = 'false' } = req.query;
+
+    // Si all=true, no requiere fechas y trae todos los pagos con paginación
+    if (all === 'true') {
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+      const offset = (pageNum - 1) * limitNum;
+
+      const result = await paymentsService.getPaymentsPaginated(offset, limitNum);
+
+      res.json({
+        success: true,
+        data: result.payments,
+        total: result.total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(result.total / limitNum)
+      });
+    } else {
+      // Modo con fechas (comportamiento original)
+      if (!start || !end) {
+        return res.status(400).json({
+          error: 'Start and end dates are required when all=false'
+        });
+      }
+
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+      const offset = (pageNum - 1) * limitNum;
+
+      const result = await paymentsService.getPaymentsWithPagination(startDate, endDate, offset, limitNum);
+
+      res.json({
+        success: true,
+        data: result.payments,
+        total: result.total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(result.total / limitNum)
       });
     }
-    
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    
-    const payments = await paymentsService.getPayments(startDate, endDate);
-    
-    res.json({
-      success: true,
-      data: payments,
-      count: payments.length
-    });
   } catch (error) {
     console.error('Payments error:', error);
     res.status(500).json({
@@ -68,6 +93,41 @@ async function getPaymentMetrics(req, res) {
   }
 }
 
+async function updatePayment(req, res) {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    const updatedPayment = await paymentsService.updatePayment(id, updateData);
+
+    if (!updatedPayment) {
+      return res.status(404).json({
+        error: 'Payment not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: updatedPayment,
+      message: 'Pago actualizado exitosamente'
+    });
+  } catch (error) {
+    console.error('Update payment error:', error);
+
+    if (error.message === 'Payment not found') {
+      return res.status(404).json({
+        error: 'Payment not found',
+        message: 'El pago especificado no existe'
+      });
+    }
+
+    res.status(500).json({
+      error: 'Failed to update payment',
+      message: error.message
+    });
+  }
+}
+
 async function createPayment(req, res) {
   try {
     const paymentData = req.body;
@@ -96,31 +156,6 @@ async function createPayment(req, res) {
   }
 }
 
-async function updatePayment(req, res) {
-  try {
-    const { id } = req.params;
-    const updateData = req.body;
-
-    const updatedPayment = await paymentsService.updatePayment(id, updateData);
-
-    if (!updatedPayment) {
-      return res.status(404).json({
-        error: 'Payment not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: updatedPayment
-    });
-  } catch (error) {
-    console.error('Update payment error:', error);
-    res.status(500).json({
-      error: 'Failed to update payment',
-      message: error.message
-    });
-  }
-}
 
 async function deletePayment(req, res) {
   try {
