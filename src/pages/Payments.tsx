@@ -139,7 +139,7 @@ export function Payments() {
         align: 'right' as const,
         visible: true,
         render: (value: any, payment: any) => (
-          <span className={payment.status === 'refunded' ? 'text-error font-medium' : 'text-success font-medium'}>
+          <span className={payment.status === 'refunded' ? 'text-error font-medium' : 'font-medium text-primary'}>
             {formatCurrency(Math.abs(value))}
           </span>
         )

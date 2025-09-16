@@ -20,8 +20,16 @@ const app = express();
 const PORT = process.env.API_PORT || 3002;
 
 // Middleware configuration
-app.use(cors({
-  origin: function (origin, callback) {
+// Excluir rutas de tracking del CORS global
+app.use((req, res, next) => {
+  // Si es una ruta de tracking, saltear el CORS global
+  if (req.path.startsWith('/api/tracking/')) {
+    return next();
+  }
+
+  // Aplicar CORS normal para otras rutas
+  cors({
+    origin: function (origin, callback) {
     // Construir lista de orígenes permitidos dinámicamente
     const allowedOrigins = [];
 
@@ -62,7 +70,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   preflightContinue: false,
   optionsSuccessStatus: 204
-}));
+  })(req, res, next);
+});
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));

@@ -13,28 +13,28 @@ export function Badge({
 }: BadgeProps) {
   const variants = {
     // Neutral - para leads, estados generales
-    default: 'bg-white/10 text-primary border border-glassBorder',
-    neutral: 'bg-white/10 text-primary border border-glassBorder',
-    secondary: 'bg-white/5 text-secondary border border-glassBorder',
+    default: 'bg-gray-100 text-gray-700 dark:bg-gray-800/50 dark:text-gray-300',
+    neutral: 'bg-gray-100 text-gray-700 dark:bg-gray-800/50 dark:text-gray-300',
+    secondary: 'bg-gray-50 text-gray-600 dark:bg-gray-900/50 dark:text-gray-400',
 
     // Success - pagos completados, clientes activos
-    success: 'bg-success/15 text-success border border-success/20',
-    primary: 'bg-primary/15 text-primary border border-primary/20',
+    success: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+    primary: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
 
     // Warning - pendiente, citas agendadas
-    warning: 'bg-warning/15 text-warning border border-warning/20',
+    warning: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
 
     // Error - reembolsado, cancelado
-    error: 'bg-error/15 text-error border border-error/20',
+    error: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
 
     // Info - información general
-    info: 'bg-info/15 text-info border border-info/20',
+    info: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400',
   }
 
   return (
     <span
       className={cn(
-        'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold transition-all',
+        'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium transition-colors',
         variants[variant],
         className
       )}
