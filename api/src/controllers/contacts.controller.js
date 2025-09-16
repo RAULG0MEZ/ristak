@@ -60,6 +60,7 @@ async function getContacts(req, res) {
 async function getContactMetrics(req, res) {
   try {
     const { start, end } = req.query;
+    const { accountId, subaccountId } = req;
 
     if (!start || !end) {
       return res.status(400).json({
@@ -72,8 +73,8 @@ async function getContactMetrics(req, res) {
 
     // Get both old metrics and new metrics with trends
     const [oldMetrics, metricsWithTrends] = await Promise.all([
-      contactsService.getContactMetrics(startDate, endDate),
-      contactsMetricsService.getContactsMetrics(startDate, endDate)
+      contactsService.getContactMetrics(startDate, endDate, accountId, subaccountId),
+      contactsMetricsService.getContactsMetrics(startDate, endDate, accountId, subaccountId)
     ]);
 
     // Combine both responses
@@ -98,6 +99,7 @@ async function getContactMetrics(req, res) {
 async function createContact(req, res) {
   try {
     const contactData = req.body;
+    const { accountId, subaccountId } = req;
 
     // Validar que tenga al menos email o teléfono
     if (!contactData.email && !contactData.phone) {
@@ -107,7 +109,7 @@ async function createContact(req, res) {
       });
     }
 
-    const newContact = await contactsService.createContact(contactData);
+    const newContact = await contactsService.createContact(contactData, accountId, subaccountId);
 
     res.status(201).json({
       success: true,
@@ -127,6 +129,7 @@ async function updateContact(req, res) {
   try {
     const { id } = req.params;
     const updateData = req.body;
+    const { accountId, subaccountId } = req;
 
     // Validar que tenga al menos nombre
     if (updateData.hasOwnProperty('name') && (!updateData.name || updateData.name.trim() === '')) {
@@ -138,7 +141,7 @@ async function updateContact(req, res) {
     // Permitir actualizar contactos sin email ni teléfono
     // Solo validamos formato si se proporciona email
 
-    const updatedContact = await contactsService.updateContact(id, updateData);
+    const updatedContact = await contactsService.updateContact(id, updateData, accountId, subaccountId);
 
     if (!updatedContact) {
       return res.status(404).json({
@@ -162,8 +165,9 @@ async function updateContact(req, res) {
 async function deleteContact(req, res) {
   try {
     const { id } = req.params;
+    const { accountId, subaccountId } = req;
 
-    const result = await contactsService.deleteContact(id);
+    const result = await contactsService.deleteContact(id, accountId, subaccountId);
 
     if (!result) {
       return res.status(404).json({
@@ -187,6 +191,7 @@ async function deleteContact(req, res) {
 async function bulkDeleteContacts(req, res) {
   try {
     const { ids } = req.body;
+    const { accountId, subaccountId } = req;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({
@@ -194,7 +199,7 @@ async function bulkDeleteContacts(req, res) {
       });
     }
 
-    const result = await contactsService.bulkDeleteContacts(ids);
+    const result = await contactsService.bulkDeleteContacts(ids, accountId, subaccountId);
 
     res.json({
       success: true,

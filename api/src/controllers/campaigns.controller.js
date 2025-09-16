@@ -4,12 +4,13 @@ const campaignsMetricsService = require('../services/campaigns.metrics.service')
 async function getCampaigns(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
     const startDate = new Date(start)
     const endDate = new Date(end)
-    const data = await campaignsService.getHierarchy(startDate, endDate)
+    const data = await campaignsService.getHierarchy(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Campaigns error:', error)
@@ -20,12 +21,13 @@ async function getCampaigns(req, res) {
 async function getCampaignsChart(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
     const startDate = new Date(start)
     const endDate = new Date(end)
-    const data = await campaignsService.getHistoricalData(startDate, endDate)
+    const data = await campaignsService.getHistoricalData(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Campaigns chart error:', error)
@@ -36,12 +38,13 @@ async function getCampaignsChart(req, res) {
 async function getCampaignsMetrics(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
     const startDate = new Date(start)
     const endDate = new Date(end)
-    const data = await campaignsMetricsService.getCampaignsMetrics(startDate, endDate)
+    const data = await campaignsMetricsService.getCampaignsMetrics(startDate, endDate, accountId, subaccountId)
     res.json(data)
   } catch (error) {
     console.error('Campaigns metrics error:', error)

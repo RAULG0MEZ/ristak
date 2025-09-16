@@ -85,7 +85,7 @@ class ContactsService {
     }
   }
   
-  async createContact(contactData) {
+  async createContact(contactData, accountId, subaccountId) {
     try {
       // Generar ID único
       const contactId = await this.generateContactId();
@@ -111,8 +111,10 @@ class ContactsService {
           status,
           source,
           created_at,
-          updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          updated_at,
+          account_id,
+          subaccount_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING *
       `;
 
@@ -126,7 +128,9 @@ class ContactsService {
         status,
         source,
         now,
-        now
+        now,
+        accountId,
+        subaccountId
       ]);
 
       const newContact = result.rows[0];
@@ -150,7 +154,7 @@ class ContactsService {
     }
   }
 
-  async updateContact(id, updateData) {
+  async updateContact(id, updateData, accountId, subaccountId) {
     try {
       const fields = [];
       const values = [];
@@ -205,10 +209,11 @@ class ContactsService {
       const query = `
         UPDATE contacts
         SET ${fields.join(', ')}
-        WHERE contact_id = $${fieldIndex}
+        WHERE contact_id = $${fieldIndex} AND account_id = $${fieldIndex + 1} AND subaccount_id = $${fieldIndex + 2}
         RETURNING *
       `;
 
+      values.push(accountId, subaccountId);
       const result = await databasePool.query(query, values);
 
       if (result.rows.length === 0) {
@@ -235,20 +240,20 @@ class ContactsService {
     }
   }
   
-  async deleteContact(id) {
+  async deleteContact(id, accountId, subaccountId) {
     try {
-      // First delete related records (payments and appointments)
-      await databasePool.query('DELETE FROM payments WHERE contact_id = $1', [id]);
-      await databasePool.query('DELETE FROM appointments WHERE contact_id = $1', [id]);
+      // First delete related records (payments and appointments) - filtered by tenant
+      await databasePool.query('DELETE FROM payments WHERE contact_id = $1 AND account_id = $2 AND subaccount_id = $3', [id, accountId, subaccountId]);
+      await databasePool.query('DELETE FROM appointments WHERE contact_id = $1 AND account_id = $2 AND subaccount_id = $3', [id, accountId, subaccountId]);
 
       // Then delete the contact
       const query = `
         DELETE FROM contacts
-        WHERE contact_id = $1
+        WHERE contact_id = $1 AND account_id = $2 AND subaccount_id = $3
         RETURNING contact_id
       `;
 
-      const result = await databasePool.query(query, [id]);
+      const result = await databasePool.query(query, [id, accountId, subaccountId]);
       return result.rows.length > 0;
     } catch (error) {
       console.error('Error deleting contact:', error);
@@ -256,7 +261,7 @@ class ContactsService {
     }
   }
 
-  async bulkDeleteContacts(ids) {
+  async bulkDeleteContacts(ids, accountId, subaccountId) {
     try {
       // Start a transaction
       const client = await databasePool.connect();
@@ -264,18 +269,18 @@ class ContactsService {
       try {
         await client.query('BEGIN');
 
-        // Delete related records for all contacts
-        await client.query('DELETE FROM payments WHERE contact_id = ANY($1::text[])', [ids]);
-        await client.query('DELETE FROM appointments WHERE contact_id = ANY($1::text[])', [ids]);
+        // Delete related records for all contacts - filtered by tenant
+        await client.query('DELETE FROM payments WHERE contact_id = ANY($1::text[]) AND account_id = $2 AND subaccount_id = $3', [ids, accountId, subaccountId]);
+        await client.query('DELETE FROM appointments WHERE contact_id = ANY($1::text[]) AND account_id = $2 AND subaccount_id = $3', [ids, accountId, subaccountId]);
 
         // Delete the contacts
         const query = `
           DELETE FROM contacts
-          WHERE contact_id = ANY($1::text[])
+          WHERE contact_id = ANY($1::text[]) AND account_id = $2 AND subaccount_id = $3
           RETURNING contact_id
         `;
 
-        const result = await client.query(query, [ids]);
+        const result = await client.query(query, [ids, accountId, subaccountId]);
         await client.query('COMMIT');
 
         return { count: result.rows.length };
@@ -291,13 +296,14 @@ class ContactsService {
     }
   }
 
-  async getContactMetrics(startDate, endDate) {
+  async getContactMetrics(startDate, endDate, accountId, subaccountId) {
     try {
       // Total contacts
       const totalQuery = `
         SELECT COUNT(*) as total
         FROM contacts
         WHERE created_at >= $1 AND created_at <= $2
+        AND account_id = $3 AND subaccount_id = $4
       `;
 
       // Contacts with appointments
@@ -306,6 +312,7 @@ class ContactsService {
         FROM contacts c
         INNER JOIN appointments a ON c.contact_id = a.contact_id
         WHERE c.created_at >= $1 AND c.created_at <= $2
+        AND c.account_id = $3 AND c.subaccount_id = $4
       `;
 
       // Customers (contacts with completed payments)
@@ -316,9 +323,11 @@ class ContactsService {
            FROM payments p2
            INNER JOIN contacts c2 ON p2.contact_id = c2.contact_id
            WHERE c2.created_at >= $1 AND c2.created_at <= $2
+           AND c2.account_id = $3 AND c2.subaccount_id = $4
            AND p2.status = 'completed') as total_ltv
         FROM contacts c
         WHERE c.created_at >= $1 AND c.created_at <= $2
+        AND c.account_id = $3 AND c.subaccount_id = $4
         AND EXISTS (
           SELECT 1 FROM payments p
           WHERE p.contact_id = c.contact_id
@@ -327,9 +336,9 @@ class ContactsService {
       `;
 
       const [total, appointments, customers] = await Promise.all([
-        databasePool.query(totalQuery, [startDate, endDate]),
-        databasePool.query(appointmentsQuery, [startDate, endDate]),
-        databasePool.query(customersQuery, [startDate, endDate])
+        databasePool.query(totalQuery, [startDate, endDate, accountId, subaccountId]),
+        databasePool.query(appointmentsQuery, [startDate, endDate, accountId, subaccountId]),
+        databasePool.query(customersQuery, [startDate, endDate, accountId, subaccountId])
       ]);
 
       const totalContacts = parseInt(total.rows[0].total) || 0;
@@ -375,13 +384,14 @@ class ContactsService {
           (SELECT COUNT(*) FROM payments p WHERE p.contact_id = c.contact_id AND p.status = 'completed') as payment_count,
           (SELECT COALESCE(SUM(p2.amount), 0) FROM payments p2 WHERE p2.contact_id = c.contact_id AND p2.status = 'completed') as ltv
         FROM contacts c
+        WHERE c.account_id = $1 AND c.subaccount_id = $2
         ORDER BY c.created_at DESC
-        LIMIT $1 OFFSET $2
+        LIMIT $3 OFFSET $4
       `;
 
       const [countResult, dataResult] = await Promise.all([
-        databasePool.query(countQuery),
-        databasePool.query(dataQuery, [limit, offset])
+        databasePool.query(countQuery, [accountId, subaccountId]),
+        databasePool.query(dataQuery, [accountId, subaccountId, limit, offset])
       ]);
 
       const contacts = dataResult.rows.map(row => ({
@@ -414,12 +424,13 @@ class ContactsService {
   }
 
   // Nuevo método para obtener contactos con paginación Y filtro de fecha
-  async getContactsWithPagination(startDate, endDate, offset, limit) {
+  async getContactsWithPagination(startDate, endDate, offset, limit, accountId, subaccountId) {
     try {
       const countQuery = `
         SELECT COUNT(*) as total
         FROM contacts
         WHERE created_at >= $1 AND created_at <= $2
+        AND account_id = $3 AND subaccount_id = $4
       `;
 
       const dataQuery = `
@@ -441,13 +452,14 @@ class ContactsService {
           (SELECT COALESCE(SUM(p2.amount), 0) FROM payments p2 WHERE p2.contact_id = c.contact_id AND p2.status = 'completed') as ltv
         FROM contacts c
         WHERE c.created_at >= $1 AND c.created_at <= $2
+        AND c.account_id = $3 AND c.subaccount_id = $4
         ORDER BY c.created_at DESC
-        LIMIT $3 OFFSET $4
+        LIMIT $5 OFFSET $6
       `;
 
       const [countResult, dataResult] = await Promise.all([
-        databasePool.query(countQuery, [startDate, endDate]),
-        databasePool.query(dataQuery, [startDate, endDate, limit, offset])
+        databasePool.query(countQuery, [startDate, endDate, accountId, subaccountId]),
+        databasePool.query(dataQuery, [startDate, endDate, accountId, subaccountId, limit, offset])
       ]);
 
       const contacts = dataResult.rows.map(row => ({

@@ -4,6 +4,8 @@ const paymentsMetricsService = require('../services/payments.metrics.service');
 async function getPayments(req, res) {
   try {
     const { start, end, page = 1, limit = 50, all = 'false' } = req.query;
+    // Obtener tenant IDs del middleware
+    const { accountId, subaccountId } = req;
 
     // Si all=true, no requiere fechas y trae todos los pagos con paginación
     if (all === 'true') {
@@ -11,7 +13,7 @@ async function getPayments(req, res) {
       const limitNum = parseInt(limit);
       const offset = (pageNum - 1) * limitNum;
 
-      const result = await paymentsService.getPaymentsPaginated(offset, limitNum);
+      const result = await paymentsService.getPaymentsPaginated(offset, limitNum, accountId, subaccountId);
 
       res.json({
         success: true,
@@ -35,7 +37,7 @@ async function getPayments(req, res) {
       const limitNum = parseInt(limit);
       const offset = (pageNum - 1) * limitNum;
 
-      const result = await paymentsService.getPaymentsWithPagination(startDate, endDate, offset, limitNum);
+      const result = await paymentsService.getPaymentsWithPagination(startDate, endDate, offset, limitNum, accountId, subaccountId);
 
       res.json({
         success: true,
@@ -58,6 +60,7 @@ async function getPayments(req, res) {
 async function getPaymentMetrics(req, res) {
   try {
     const { start, end } = req.query;
+    const { accountId, subaccountId } = req;
 
     if (!start || !end) {
       return res.status(400).json({
@@ -70,8 +73,8 @@ async function getPaymentMetrics(req, res) {
 
     // Get both old metrics and new metrics with trends
     const [oldMetrics, metricsWithTrends] = await Promise.all([
-      paymentsService.getPaymentMetrics(startDate, endDate),
-      paymentsMetricsService.getPaymentsMetrics(startDate, endDate)
+      paymentsService.getPaymentMetrics(startDate, endDate, accountId, subaccountId),
+      paymentsMetricsService.getPaymentsMetrics(startDate, endDate, accountId, subaccountId)
     ]);
 
     // Combine both responses
@@ -97,8 +100,9 @@ async function updatePayment(req, res) {
   try {
     const { id } = req.params;
     const updateData = req.body;
+    const { accountId, subaccountId } = req;
 
-    const updatedPayment = await paymentsService.updatePayment(id, updateData);
+    const updatedPayment = await paymentsService.updatePayment(id, updateData, accountId, subaccountId);
 
     if (!updatedPayment) {
       return res.status(404).json({
@@ -131,6 +135,7 @@ async function updatePayment(req, res) {
 async function createPayment(req, res) {
   try {
     const paymentData = req.body;
+    const { accountId, subaccountId } = req;
 
     // Validar campos requeridos
     if (!paymentData.contactId || !paymentData.amount || !paymentData.date) {
@@ -140,7 +145,7 @@ async function createPayment(req, res) {
       });
     }
 
-    const newPayment = await paymentsService.createPayment(paymentData);
+    const newPayment = await paymentsService.createPayment(paymentData, accountId, subaccountId);
 
     res.status(201).json({
       success: true,
@@ -160,8 +165,9 @@ async function createPayment(req, res) {
 async function deletePayment(req, res) {
   try {
     const { id } = req.params;
-    
-    const result = await paymentsService.deletePayment(id);
+    const { accountId, subaccountId } = req;
+
+    const result = await paymentsService.deletePayment(id, accountId, subaccountId);
     
     if (!result) {
       return res.status(404).json({

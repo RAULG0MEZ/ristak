@@ -4,6 +4,7 @@ const reportsMetricsService = require('../services/reports.metrics.service')
 async function getReportMetrics(req, res) {
   try {
     const { start, end, groupBy, type } = req.query
+    const { accountId, subaccountId } = req
 
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
@@ -13,9 +14,9 @@ async function getReportMetrics(req, res) {
     const endDate = new Date(end)
 
     // Si type === 'attributed', usar el método de métricas atribuidas
-    const data = type === 'attributed' 
-      ? await reportsService.getAttributedMetrics(startDate, endDate, groupBy || 'month')
-      : await reportsService.getMetrics(startDate, endDate, groupBy || 'month')
+    const data = type === 'attributed'
+      ? await reportsService.getAttributedMetrics(startDate, endDate, groupBy || 'month', accountId, subaccountId)
+      : await reportsService.getMetrics(startDate, endDate, groupBy || 'month', accountId, subaccountId)
       
     res.json({ success: true, data })
   } catch (error) {
@@ -28,6 +29,7 @@ async function getReportMetrics(req, res) {
 async function getReportSales(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
@@ -35,7 +37,7 @@ async function getReportSales(req, res) {
     // Ajustar fechas a UTC para evitar problemas de timezone
     const startDate = new Date(start + 'T00:00:00.000Z')
     const endDate = new Date(end + 'T23:59:59.999Z')
-    const data = await reportsService.getSalesDetails(startDate, endDate)
+    const data = await reportsService.getSalesDetails(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Report sales error:', error)
@@ -47,6 +49,7 @@ async function getReportSales(req, res) {
 async function getReportSalesAttributed(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
@@ -54,7 +57,7 @@ async function getReportSalesAttributed(req, res) {
     // Ajustar fechas a UTC para evitar problemas de timezone
     const startDate = new Date(start + 'T00:00:00.000Z')
     const endDate = new Date(end + 'T23:59:59.999Z')
-    const data = await reportsService.getSalesDetailsAttributed(startDate, endDate)
+    const data = await reportsService.getSalesDetailsAttributed(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Report sales attributed error:', error)
@@ -66,6 +69,7 @@ async function getReportSalesAttributed(req, res) {
 async function getReportLeads(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
@@ -73,7 +77,7 @@ async function getReportLeads(req, res) {
     // Ajustar fechas a UTC para evitar problemas de timezone
     const startDate = new Date(start + 'T00:00:00.000Z')
     const endDate = new Date(end + 'T23:59:59.999Z')
-    const data = await reportsService.getLeadsDetails(startDate, endDate)
+    const data = await reportsService.getLeadsDetails(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Report leads error:', error)
@@ -85,6 +89,7 @@ async function getReportLeads(req, res) {
 async function getReportLeadsAttributed(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
@@ -92,7 +97,7 @@ async function getReportLeadsAttributed(req, res) {
     // Ajustar fechas a UTC para evitar problemas de timezone
     const startDate = new Date(start + 'T00:00:00.000Z')
     const endDate = new Date(end + 'T23:59:59.999Z')
-    const data = await reportsService.getLeadsDetailsAttributed(startDate, endDate)
+    const data = await reportsService.getLeadsDetailsAttributed(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Report leads attributed error:', error)
@@ -104,6 +109,7 @@ async function getReportLeadsAttributed(req, res) {
 async function getReportAppointments(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
@@ -111,7 +117,7 @@ async function getReportAppointments(req, res) {
     // Ajustar fechas a UTC para evitar problemas de timezone
     const startDate = new Date(start + 'T00:00:00.000Z')
     const endDate = new Date(end + 'T23:59:59.999Z')
-    const data = await reportsService.getAppointmentsDetails(startDate, endDate)
+    const data = await reportsService.getAppointmentsDetails(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Report appointments error:', error)
@@ -123,6 +129,7 @@ async function getReportAppointments(req, res) {
 async function getReportAppointmentsAttributed(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
@@ -130,7 +137,7 @@ async function getReportAppointmentsAttributed(req, res) {
     // Ajustar fechas a UTC para evitar problemas de timezone
     const startDate = new Date(start + 'T00:00:00.000Z')
     const endDate = new Date(end + 'T23:59:59.999Z')
-    const data = await reportsService.getAppointmentsDetailsAttributed(startDate, endDate)
+    const data = await reportsService.getAppointmentsDetailsAttributed(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Report appointments attributed error:', error)
@@ -142,6 +149,7 @@ async function getReportAppointmentsAttributed(req, res) {
 async function getReportNewCustomers(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
@@ -149,7 +157,7 @@ async function getReportNewCustomers(req, res) {
     // Ajustar fechas a UTC para evitar problemas de timezone
     const startDate = new Date(start + 'T00:00:00.000Z')
     const endDate = new Date(end + 'T23:59:59.999Z')
-    const data = await reportsService.getNewCustomersDetails(startDate, endDate)
+    const data = await reportsService.getNewCustomersDetails(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Report new customers error:', error)
@@ -161,6 +169,7 @@ async function getReportNewCustomers(req, res) {
 async function getReportNewCustomersAttributed(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
@@ -168,7 +177,7 @@ async function getReportNewCustomersAttributed(req, res) {
     // Ajustar fechas a UTC para evitar problemas de timezone
     const startDate = new Date(start + 'T00:00:00.000Z')
     const endDate = new Date(end + 'T23:59:59.999Z')
-    const data = await reportsService.getNewCustomersDetailsAttributed(startDate, endDate)
+    const data = await reportsService.getNewCustomersDetailsAttributed(startDate, endDate, accountId, subaccountId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Report new customers attributed error:', error)
@@ -192,13 +201,14 @@ module.exports = {
 async function getReportSummaryMetrics(req, res) {
   try {
     const { start, end } = req.query
+    const { accountId, subaccountId } = req
     if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required' })
     }
 
     const startDate = new Date(start)
     const endDate = new Date(end)
-    const data = await reportsMetricsService.getReportsMetrics(startDate, endDate)
+    const data = await reportsMetricsService.getReportsMetrics(startDate, endDate, accountId, subaccountId)
     res.json(data)
   } catch (error) {
     console.error('Report summary metrics error:', error)

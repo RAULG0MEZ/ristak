@@ -1,23 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const trackingService = require('../services/tracking.service');
-const cloudflareService = require('../services/cloudflare.service');
-const dns = require('dns').promises;
-const { verifyCname } = require('../utils/dns-helper');
 
-// Middleware CORS específico para tracking - PERMITE TODOS LOS ORÍGENES
-const trackingCors = (req, res, next) => {
-  // Permitir CUALQUIER origen para tracking
-  const origin = req.headers.origin || '*';
-  res.header('Access-Control-Allow-Origin', origin);
+// =============================================================================
+// TRACKING SIMPLE Y MULTITENANT
+// =============================================================================
+// - Un cliente pega: <script src="https://su-dominio.com/snip.js?s=SUBACCOUNT_ID"></script>
+// - El script envía pageviews a /collect
+// - Todo se guarda en tracking.sessions
+// =============================================================================
+
+// Middleware CORS - ABIERTO A TODOS LOS DOMINIOS
+const corsOpen = (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Accept');
-  res.header('Access-Control-Max-Age', '86400'); // Cache preflight por 24 horas
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
 
-  // NO credentials para permitir * en Origin
-  // res.header('Access-Control-Allow-Credentials', 'true');
-
-  // Manejar preflight
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
   }
@@ -25,562 +22,159 @@ const trackingCors = (req, res, next) => {
   next();
 };
 
-// Obtener configuración de tracking para la subcuenta
-router.get('/config', async (req, res) => {
-  try {
-    const subaccountId = req.query.subaccountId || process.env.DEFAULT_SUBACCOUNT_ID;
+// Aplicar CORS a todas las rutas de tracking
+router.use(corsOpen);
 
-    // En el futuro, esto debería venir de la base de datos por subcuenta
-    // Por ahora, usar el valor del .env como default
-    const trackingHost = process.env.TRACKING_HOST;
+// =============================================================================
+// GET /snip.js - Servir el script de tracking
+// =============================================================================
+router.get('/snip.js', (req, res) => {
+  const subaccountId = req.query.s || 'default';
 
-    res.json({
-      success: true,
-      subaccountId,
-      trackingHost,
-      // Aquí podrías agregar más configuraciones específicas de la subcuenta
-    });
-  } catch (error) {
-    console.error('Error getting tracking config:', error);
-    res.status(500).json({
-      error: {
-        code: 'CONFIG_ERROR',
-        message: 'Failed to get tracking configuration'
-      }
-    });
-  }
-});
+  // Detectar el protocolo y host correctos
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.headers['x-original-host'] || req.get('host');
 
-// Verificar CNAME de un dominio
-router.post('/verify-cname', async (req, res) => {
-  try {
-    const { hostname } = req.body;
+  const script = `
+(function() {
+  // Tracking Script v1.0
+  var sid = '${subaccountId}';
+  var host = '${protocol}://${host}';
 
-    if (!hostname) {
-      return res.status(400).json({
-        error: {
-          code: 'MISSING_HOSTNAME',
-          message: 'Hostname is required'
-        }
-      });
-    }
+  // Generar ID único de sesión
+  var sessionId = 'sess_' + Math.random().toString(36).substr(2, 9);
 
-    const trackingHost = process.env.TRACKING_HOST;
-
-    // Usar el helper robusto para verificar CNAME
-    const cnameValue = await verifyCname(hostname);
-
-    if (cnameValue) {
-      // Normalizar los valores para comparación (quitar punto final si existe)
-      const normalizeHost = (host) => host.toLowerCase().replace(/\.$/, '');
-      const isValid = normalizeHost(cnameValue) === normalizeHost(trackingHost);
-
-      console.log(`🎯 Comparación final: "${normalizeHost(cnameValue)}" === "${normalizeHost(trackingHost)}" => ${isValid}`);
-
-      res.json({
-        success: true,
-        isValid,
-        hostname,
-        cnameRecords: [cnameValue],
-        expectedCname: trackingHost,
-        message: isValid
-          ? 'CNAME configurado correctamente'
-          : `El dominio debe apuntar a ${trackingHost}, pero apunta a ${cnameValue}`
-      });
-    } else {
-      // No se encontró CNAME
-      res.json({
-        success: true,
-        isValid: false,
-        hostname,
-        expectedCname: trackingHost,
-        error: 'No se encontró registro CNAME',
-        message: `Configura un registro CNAME apuntando a ${trackingHost}`
-      });
-    }
-  } catch (error) {
-    console.error('Error verifying CNAME:', error);
-    res.status(500).json({
-      error: {
-        code: 'VERIFY_CNAME_ERROR',
-        message: error.message || 'Failed to verify CNAME'
-      }
-    });
-  }
-});
-
-// Crear nuevo dominio de tracking
-router.post('/domains', async (req, res) => {
-  try {
-    const { hostname, skipCnameCheck } = req.body;
-    const subaccountId = req.body.subaccountId || process.env.DEFAULT_SUBACCOUNT_ID;
-
-    if (!hostname) {
-      return res.status(400).json({
-        error: {
-          code: 'MISSING_HOSTNAME',
-          message: 'Hostname is required'
-        }
-      });
-    }
-
-    // Verificar CNAME antes de proceder (a menos que se salte explícitamente)
-    if (!skipCnameCheck) {
-      const trackingHost = process.env.TRACKING_HOST;
-
-      try {
-        const cnameRecords = await dns.resolveCname(hostname);
-
-        // Normalizar los valores para comparación (quitar punto final si existe)
-        const normalizeHost = (host) => host.toLowerCase().replace(/\.$/, '');
-
-        const isValid = cnameRecords.some(cname => {
-          const normalized = normalizeHost(cname);
-          const expected = normalizeHost(trackingHost);
-          return normalized === expected;
-        });
-
-        if (!isValid) {
-          return res.status(400).json({
-            error: {
-              code: 'INVALID_CNAME',
-              message: `El dominio debe tener un registro CNAME apuntando a ${trackingHost}`,
-              details: {
-                hostname,
-                expectedCname: trackingHost,
-                currentCname: cnameRecords
-              }
-            }
-          });
-        }
-      } catch (dnsError) {
-        return res.status(400).json({
-          error: {
-            code: 'CNAME_NOT_FOUND',
-            message: `No se encontró registro CNAME. Configura un CNAME apuntando a ${trackingHost}`,
-            details: {
-              hostname,
-              expectedCname: trackingHost,
-              dnsError: dnsError.message
-            }
-          }
-        });
-      }
-    }
-
-    const result = await trackingService.createTrackingDomain(subaccountId, hostname);
-    res.json(result);
-  } catch (error) {
-    console.error('Error creating tracking domain:', error);
-    res.status(500).json({
-      error: {
-        code: 'CREATE_DOMAIN_ERROR',
-        message: error.message || 'Failed to create tracking domain'
-      }
-    });
-  }
-});
-
-// Obtener dominios de tracking
-router.get('/domains', async (req, res) => {
-  try {
-    const subaccountId = req.query.subaccountId || process.env.DEFAULT_SUBACCOUNT_ID;
-    const domains = await trackingService.getTrackingDomains(subaccountId);
-    res.json({ success: true, domains });
-  } catch (error) {
-    console.error('Error getting tracking domains:', error);
-    res.status(500).json({
-      error: {
-        code: 'GET_DOMAINS_ERROR',
-        message: 'Failed to get tracking domains'
-      }
-    });
-  }
-});
-
-// Eliminar dominio de tracking
-router.delete('/domains/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const subaccountId = req.query.subaccountId || process.env.DEFAULT_SUBACCOUNT_ID;
-
-    const result = await trackingService.deleteTrackingDomain(id, subaccountId);
-    res.json(result);
-  } catch (error) {
-    console.error('Error deleting tracking domain:', error);
-    res.status(500).json({
-      error: {
-        code: 'DELETE_DOMAIN_ERROR',
-        message: error.message || 'Failed to delete tracking domain'
-      }
-    });
-  }
-});
-
-// Obtener registros DNS (respuesta inmediata)
-router.get('/domains/:id/dns-records', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Obtener registros actuales (sin bloquear)
-    const dnsData = await trackingService.getDomainDNSRecords(id);
-
-    res.json(dnsData);
-  } catch (error) {
-    console.error('Error getting DNS records:', error);
-    res.status(500).json({
-      error: {
-        code: 'GET_DNS_ERROR',
-        message: error.message || 'Failed to get DNS records'
-      }
-    });
-  }
-});
-
-// Endpoint para polling de registros SSL pendientes
-router.get('/domains/:id/poll-ssl', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { timeout = 30000 } = req.query; // Timeout máximo 30 segundos por defecto
-
-    // Obtener dominio
-    const domains = await trackingService.getTrackingDomains(req.query.subaccountId);
-    const domain = domains.find(d => d.id === id);
-
-    if (!domain) {
-      return res.status(404).json({
-        error: { code: 'DOMAIN_NOT_FOUND', message: 'Domain not found' }
-      });
-    }
-
-    // Si ya tiene registros SSL, devolverlos inmediatamente
-    if (domain.dcv_record_value && !domain.dcv_record_value.includes('pending')) {
-      return res.json({
-        success: true,
-        ready: true,
-        records: JSON.parse(domain.dns_instructions || '[]')
-      });
-    }
-
-    // Hacer polling con timeout
-    const startTime = Date.now();
-    const maxTime = Math.min(parseInt(timeout), 60000); // Máximo 60 segundos
-
-    const poll = async () => {
-      try {
-        const dnsData = await trackingService.getDomainDNSRecords(id);
-        const sslRecord = dnsData.records.find(r => r.purpose === 'ssl_validation' && r.status === 'ready');
-
-        if (sslRecord) {
-          return res.json({
-            success: true,
-            ready: true,
-            records: dnsData.records
-          });
-        }
-
-        // Verificar timeout
-        if (Date.now() - startTime > maxTime) {
-          return res.json({
-            success: true,
-            ready: false,
-            message: 'SSL records still pending, try again later',
-            records: dnsData.records
-          });
-        }
-
-        // Continuar polling después de 2 segundos
-        setTimeout(poll, 2000);
-      } catch (error) {
-        console.error('Polling error:', error);
-        res.status(500).json({
-          error: {
-            code: 'POLL_ERROR',
-            message: error.message
-          }
-        });
-      }
+  // Función para enviar pageview
+  function track() {
+    var data = {
+      sid: sid,
+      url: window.location.href,
+      ref: document.referrer || '',
+      ts: new Date().toISOString(),
+      sess: sessionId
     };
 
-    // Iniciar polling
-    poll();
-  } catch (error) {
-    console.error('Error in poll-ssl:', error);
-    res.status(500).json({
-      error: {
-        code: 'POLL_SSL_ERROR',
-        message: error.message
-      }
-    });
+    // Usar sendBeacon si está disponible
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(host + '/collect', JSON.stringify(data));
+    } else {
+      // Fallback a fetch
+      fetch(host + '/collect', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+        keepalive: true
+      }).catch(function() {});
+    }
   }
+
+  // Tracking inicial
+  track();
+
+  // Tracking en cambios de URL (para SPAs)
+  var oldPushState = history.pushState;
+  history.pushState = function() {
+    oldPushState.apply(history, arguments);
+    setTimeout(track, 100);
+  };
+
+  var oldReplaceState = history.replaceState;
+  history.replaceState = function() {
+    oldReplaceState.apply(history, arguments);
+    setTimeout(track, 100);
+  };
+
+  window.addEventListener('popstate', track);
+})();
+`;
+
+  res.set('Content-Type', 'application/javascript');
+  res.set('Cache-Control', 'no-cache, must-revalidate');
+  res.send(script);
 });
 
-// Verificar estado del dominio
-router.post('/domains/:id/verify', async (req, res) => {
+// =============================================================================
+// POST /collect - Recibir datos de tracking
+// =============================================================================
+router.post('/collect', async (req, res) => {
   try {
-    const { id } = req.params;
-    const result = await trackingService.verifyDomainStatus(id);
-    res.json(result);
-  } catch (error) {
-    console.error('Error verifying domain:', error);
-    res.status(500).json({
-      error: {
-        code: 'VERIFY_DOMAIN_ERROR',
-        message: error.message || 'Failed to verify domain status'
-      }
-    });
-  }
-});
+    // Obtener datos del request
+    const { sid: subaccountId, url, ref: referrer, ts: timestamp, sess: sessionId } = req.body || {};
 
-// Manejar OPTIONS para collect
-router.options('/collect', trackingCors);
-
-// Endpoint collector para recibir pageviews - ABIERTO A TODOS LOS DOMINIOS
-router.post('/collect', trackingCors, async (req, res) => {
-  try {
-    // Obtener IP real del cliente
+    // Obtener IP real
     const ip = req.headers['x-forwarded-for']?.split(',')[0] ||
                req.headers['x-real-ip'] ||
                req.connection.remoteAddress;
 
-    const data = {
-      url: req.body.url || req.headers.referer,
-      referrer: req.body.referrer || req.headers.referer,
-      userAgent: req.headers['user-agent'],
-      ip: ip,
-      accountId: req.body.accountId,
-      subaccountId: req.body.subaccountId
-    };
+    // Obtener user agent
+    const userAgent = req.headers['user-agent'] || '';
 
-    const result = await trackingService.recordPageView(data);
+    // Validación básica
+    if (!subaccountId) {
+      return res.status(400).json({ error: 'Missing subaccount ID' });
+    }
 
-    // Responder con pixel transparente
-    res.status(200).json({ success: true, sessionId: result.sessionId });
-  } catch (error) {
-    console.error('Error collecting pageview:', error);
-    // No revelar errores al cliente
-    res.status(200).json({ success: true });
-  }
-});
-
-// Servir el script snip.js - ABIERTO A TODOS LOS DOMINIOS
-router.get('/snip.js', trackingCors, (req, res) => {
-  const accountId = req.query.a || process.env.ACCOUNT_ID;
-  const subaccountId = req.query.s || process.env.DEFAULT_SUBACCOUNT_ID;
-
-  // Detectar protocolo correcto (considera proxy reverso)
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-  const host = req.get('host');
-
-  const script = `
-(function() {
-  // Configuración
-  var config = {
-    accountId: '${accountId}',
-    subaccountId: '${subaccountId}',
-    collectorUrl: '${protocol}://${host}/api/tracking/collect'
-  };
-
-  // Función para enviar pageview
-  function sendPageView() {
+    // Parsear URL
+    let urlData = {};
     try {
-      var data = {
-        url: window.location.href,
-        referrer: document.referrer || '',
-        accountId: config.accountId,
-        subaccountId: config.subaccountId,
-        timestamp: new Date().toISOString()
+      const parsedUrl = new URL(url);
+      urlData = {
+        host: parsedUrl.hostname,
+        path: parsedUrl.pathname,
+        query: parsedUrl.search,
+        hash: parsedUrl.hash
       };
-
-      // Usar sendBeacon si está disponible
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon(config.collectorUrl, JSON.stringify(data));
-      } else {
-        // Fallback a fetch
-        fetch(config.collectorUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(data),
-          keepalive: true
-        }).catch(function() {
-          // Silenciar errores
-        });
-      }
     } catch (e) {
-      // Silenciar errores
+      urlData = { host: 'unknown', path: '/' };
     }
-  }
 
-  // Enviar pageview inicial
-  sendPageView();
+    // Guardar en base de datos
+    const { databasePool } = require('../config/database.config');
 
-  // Detectar cambios en SPA
-  var lastUrl = window.location.href;
+    const query = `
+      INSERT INTO tracking.sessions (
+        session_id,
+        subaccount_id,
+        account_id,
+        visitor_id,
+        landing_url,
+        landing_host,
+        landing_path,
+        landing_query,
+        referrer_url,
+        ip,
+        user_agent,
+        created_at,
+        pageviews_count
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), 1
+      )
+      ON CONFLICT (session_id) DO UPDATE SET
+        pageviews_count = tracking.sessions.pageviews_count + 1,
+        last_event_at = NOW()
+    `;
 
-  // Interceptar pushState
-  var originalPushState = history.pushState;
-  if (originalPushState) {
-    history.pushState = function() {
-      originalPushState.apply(history, arguments);
-      setTimeout(function() {
-        if (window.location.href !== lastUrl) {
-          lastUrl = window.location.href;
-          sendPageView();
-        }
-      }, 0);
-    };
-  }
+    await databasePool.query(query, [
+      sessionId || `sess_${Math.random().toString(36).substr(2, 9)}`,
+      subaccountId,
+      'default', // account_id - se puede obtener de subaccounts table
+      `vis_${Math.random().toString(36).substr(2, 9)}`, // visitor_id único
+      url,
+      urlData.host,
+      urlData.path,
+      urlData.query,
+      referrer,
+      ip,
+      userAgent
+    ]);
 
-  // Interceptar replaceState
-  var originalReplaceState = history.replaceState;
-  if (originalReplaceState) {
-    history.replaceState = function() {
-      originalReplaceState.apply(history, arguments);
-      setTimeout(function() {
-        if (window.location.href !== lastUrl) {
-          lastUrl = window.location.href;
-          sendPageView();
-        }
-      }, 0);
-    };
-  }
+    // Responder éxito
+    res.json({ success: true });
 
-  // Escuchar popstate (navegación con botones atrás/adelante)
-  window.addEventListener('popstate', function() {
-    if (window.location.href !== lastUrl) {
-      lastUrl = window.location.href;
-      sendPageView();
-    }
-  });
-
-})();
-  `.trim();
-
-  res.set('Content-Type', 'application/javascript');
-  res.set('Cache-Control', 'public, max-age=3600');
-  res.send(script);
-});
-
-// Obtener snippet para el usuario
-router.get('/snippet', async (req, res) => {
-  try {
-    const subaccountId = req.query.subaccountId || process.env.DEFAULT_SUBACCOUNT_ID;
-
-    // Buscar dominio activo
-    const activeDomain = await trackingService.getActiveDomain(subaccountId);
-
-    // Usar dominio activo o fallback
-    const trackingHost = activeDomain?.hostname || process.env.TRACKING_HOST;
-
-    const snippet = `<script async src="https://${trackingHost}/snip.js?s=${subaccountId}"></script>`;
-
-    res.json({
-      success: true,
-      snippet: snippet,
-      host: trackingHost,
-      isActive: !!activeDomain
-    });
   } catch (error) {
-    console.error('Error getting snippet:', error);
-    res.status(500).json({
-      error: {
-        code: 'GET_SNIPPET_ERROR',
-        message: 'Failed to generate snippet'
-      }
-    });
+    console.error('Error in /collect:', error);
+    res.status(500).json({ error: 'Failed to track' });
   }
-});
-
-// SSE endpoint mejorado para verificación y registros DNS en tiempo real
-router.get('/domains/:id/status-stream', async (req, res) => {
-  const { id } = req.params;
-
-  // Configurar SSE
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
-
-  // Enviar evento inicial con estado actual
-  try {
-    const dnsData = await trackingService.getDomainDNSRecords(id);
-    res.write(`data: ${JSON.stringify({
-      status: 'connected',
-      records: dnsData.records,
-      sslPending: dnsData.sslPending,
-      hostname: dnsData.hostname
-    })}\n\n`);
-  } catch (error) {
-    res.write(`data: {"status": "connected", "error": "${error.message}"}\n\n`);
-  }
-
-  let checkCount = 0;
-  const maxChecks = 120; // Máximo 10 minutos (120 * 5 segundos)
-
-  // Verificar estado cada 5 segundos
-  const interval = setInterval(async () => {
-    checkCount++;
-
-    try {
-      // Obtener registros DNS actualizados
-      const dnsData = await trackingService.getDomainDNSRecords(id);
-
-      // Verificar estado del dominio
-      const result = await trackingService.verifyDomainStatus(id);
-
-      // Determinar si tenemos todos los registros listos
-      const sslRecord = dnsData.records.find(r => r.purpose === 'ssl_validation' && r.status === 'ready');
-      const ownershipRecord = dnsData.records.find(r => r.purpose === 'ownership_verification' && r.status === 'ready');
-      const allRecordsReady = sslRecord && ownershipRecord;
-
-      // Enviar actualización
-      res.write(`data: ${JSON.stringify({
-        status: result.domain.status,
-        sslStatus: result.domain.ssl_status,
-        isActive: result.isActive,
-        records: dnsData.records,
-        allRecordsReady,
-        checkCount,
-        timestamp: new Date().toISOString()
-      })}\n\n`);
-
-      // Cerrar si está completamente verificado o alcanzamos el límite
-      if ((result.isActive && allRecordsReady) || checkCount >= maxChecks) {
-        const finalMessage = result.isActive ?
-          'Domain verified successfully with all DNS records' :
-          'Max check time reached, please continue manually';
-
-        res.write(`data: ${JSON.stringify({
-          status: 'completed',
-          message: finalMessage,
-          isActive: result.isActive,
-          allRecordsReady
-        })}\n\n`);
-
-        clearInterval(interval);
-        res.end();
-      }
-    } catch (error) {
-      console.error('SSE error:', error);
-      res.write(`data: {"error": "${error.message}"}\n\n`);
-
-      // Si hay muchos errores consecutivos, cerrar la conexión
-      if (checkCount > 5) {
-        clearInterval(interval);
-        res.end();
-      }
-    }
-  }, 5000);
-
-  // Limpiar al cerrar conexión
-  req.on('close', () => {
-    clearInterval(interval);
-    res.end();
-  });
 });
 
 module.exports = router;
