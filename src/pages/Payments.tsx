@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { PageContainer, TableWithControls, Badge, Button, DateRangePicker, KPICard, Modal, Pagination } from '../ui'
+import { PageContainer, TableWithControls, Badge, Button, DateRangePicker, KPICard, Modal, Pagination, TabList } from '../ui'
 import { useDateRange } from '../contexts/DateContext'
 import { usePayments } from '../hooks/usePayments'
 import { useColumnsConfig } from '../hooks/useColumnsConfig'
@@ -220,56 +220,39 @@ export function Payments() {
   return (
     <PageContainer>
       <div className="space-y-6">
-        {/* Título y selector de fechas */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-primary">Pagos</h1>
-            <div className="flex items-center gap-4">
-              {/* Toggle de modo de vista */}
-              <div className="flex items-center gap-2 px-3 py-1.5 glass rounded-lg">
-                <button
-                  className={`px-3 py-1 rounded transition-all ${
-                    viewMode === 'filtered'
-                      ? 'bg-primary text-white'
-                      : 'text-secondary hover:text-primary'
-                  }`}
-                  onClick={() => setViewMode('filtered')}
-                >
-                  <Icons.calendar className="w-4 h-4 inline mr-1" />
-                  Por fecha
-                </button>
-                <button
-                  className={`px-3 py-1 rounded transition-all ${
-                    viewMode === 'all'
-                      ? 'bg-primary text-white'
-                      : 'text-secondary hover:text-primary'
-                  }`}
-                  onClick={() => setViewMode('all')}
-                >
-                  <Icons.folder className="w-4 h-4 inline mr-1" />
-                  Todos
-                </button>
-              </div>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  setCreateForm({
-                    contactId: '',
-                    amount: '',
-                    date: new Date().toISOString().split('T')[0],
-                    description: '',
-                    paymentMethod: 'card',
-                    status: 'completed'
-                  })
-                  setCreateModal({ isOpen: true })
-                }}
-              >
-                <Icons.plus className="w-4 h-4 mr-2" />
-                Registrar/Cobrar
-              </Button>
-            </div>
-          </div>
+        {/* Título y botones */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-primary">Pagos</h1>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setCreateForm({
+                contactId: '',
+                amount: '',
+                date: new Date().toISOString().split('T')[0],
+                description: '',
+                paymentMethod: 'card',
+                status: 'completed'
+              })
+              setCreateModal({ isOpen: true })
+            }}
+          >
+            <Icons.plus className="w-4 h-4 mr-2" />
+            Registrar
+          </Button>
+        </div>
+
+        {/* TabList y DateRangePicker */}
+        <div className="flex items-center gap-4">
+          <TabList
+            tabs={[
+              { value: 'filtered', label: 'Por fecha' },
+              { value: 'all', label: 'Todos' }
+            ]}
+            value={viewMode}
+            onChange={(value) => setViewMode(value as 'all' | 'filtered')}
+          />
           {viewMode === 'filtered' && <DateRangePicker />}
         </div>
 

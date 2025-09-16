@@ -5,6 +5,26 @@ const cloudflareService = require('../services/cloudflare.service');
 const dns = require('dns').promises;
 const { verifyCname } = require('../utils/dns-helper');
 
+// Middleware CORS específico para tracking - PERMITE TODOS LOS ORÍGENES
+const trackingCors = (req, res, next) => {
+  // Permitir CUALQUIER origen para tracking
+  const origin = req.headers.origin || '*';
+  res.header('Access-Control-Allow-Origin', origin);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  res.header('Access-Control-Max-Age', '86400'); // Cache preflight por 24 horas
+
+  // NO credentials para permitir * en Origin
+  // res.header('Access-Control-Allow-Credentials', 'true');
+
+  // Manejar preflight
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+};
+
 // Obtener configuración de tracking para la subcuenta
 router.get('/config', async (req, res) => {
   try {
@@ -312,8 +332,11 @@ router.post('/domains/:id/verify', async (req, res) => {
   }
 });
 
-// Endpoint collector para recibir pageviews
-router.post('/collect', async (req, res) => {
+// Manejar OPTIONS para collect
+router.options('/collect', trackingCors);
+
+// Endpoint collector para recibir pageviews - ABIERTO A TODOS LOS DOMINIOS
+router.post('/collect', trackingCors, async (req, res) => {
   try {
     // Obtener IP real del cliente
     const ip = req.headers['x-forwarded-for']?.split(',')[0] ||
@@ -340,8 +363,8 @@ router.post('/collect', async (req, res) => {
   }
 });
 
-// Servir el script snip.js
-router.get('/snip.js', (req, res) => {
+// Servir el script snip.js - ABIERTO A TODOS LOS DOMINIOS
+router.get('/snip.js', trackingCors, (req, res) => {
   const accountId = req.query.a || process.env.ACCOUNT_ID;
   const subaccountId = req.query.s || process.env.DEFAULT_SUBACCOUNT_ID;
 

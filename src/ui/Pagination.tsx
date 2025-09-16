@@ -21,7 +21,7 @@ export function Pagination({
   onPageSizeChange,
   className
 }: PaginationProps) {
-  const pageSizeOptions = [10, 25, 50, 100]
+  const pageSizeOptions = [25, 50, 100, 200]
 
   // Calculate range
   const start = (currentPage - 1) * pageSize + 1
@@ -30,7 +30,7 @@ export function Pagination({
   // Generate page numbers to display
   const getPageNumbers = () => {
     const pages = []
-    const maxVisible = 7 // Maximum visible page numbers
+    const maxVisible = 5 // Maximum visible page numbers
 
     if (totalPages <= maxVisible) {
       for (let i = 1; i <= totalPages; i++) {
@@ -41,18 +41,8 @@ export function Pagination({
       pages.push(1)
 
       // Calculate start and end of range
-      let rangeStart = Math.max(2, currentPage - 2)
-      let rangeEnd = Math.min(totalPages - 1, currentPage + 2)
-
-      // Adjust range if at the beginning
-      if (currentPage <= 3) {
-        rangeEnd = 5
-      }
-
-      // Adjust range if at the end
-      if (currentPage >= totalPages - 2) {
-        rangeStart = totalPages - 4
-      }
+      let rangeStart = Math.max(2, currentPage - 1)
+      let rangeEnd = Math.min(totalPages - 1, currentPage + 1)
 
       // Add ellipsis if needed
       if (rangeStart > 2) {
@@ -61,9 +51,7 @@ export function Pagination({
 
       // Add range
       for (let i = rangeStart; i <= rangeEnd; i++) {
-        if (i > 1 && i < totalPages) {
-          pages.push(i)
-        }
+        pages.push(i)
       }
 
       // Add ellipsis if needed
@@ -80,196 +68,86 @@ export function Pagination({
     return pages
   }
 
-  if (totalItems === 0) return null
-
   return (
     <div className={cn(
-      "flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4",
-      "bg-gradient-to-r from-background/50 via-background/30 to-background/50",
-      "border-t border-glassBorder/50 backdrop-blur-sm",
+      "flex items-center justify-between gap-4 px-4 py-3",
       className
     )}>
-      {/* Left side - Results info and page size selector */}
-      <div className="flex flex-col sm:flex-row items-center gap-4">
-        {/* Results info with better styling */}
-        <div className="flex items-center gap-2 px-4 py-2 glass rounded-xl border border-glassBorder/30">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm text-tertiary">Mostrando</span>
-            <span className="text-sm font-semibold text-primary px-2 py-0.5 bg-primary/10 rounded">
-              {start}
-            </span>
-            <span className="text-sm text-tertiary">-</span>
-            <span className="text-sm font-semibold text-primary px-2 py-0.5 bg-primary/10 rounded">
-              {end}
-            </span>
-            <span className="text-sm text-tertiary">de</span>
-            <span className="text-sm font-semibold text-info px-2 py-0.5 bg-info/10 rounded">
-              {totalItems}
-            </span>
-          </div>
-        </div>
+      {/* Left side - Results info */}
+      <div className="flex items-center gap-4">
+        <span className="text-sm text-secondary">
+          Mostrando <span className="font-medium text-primary">{start}</span> a{' '}
+          <span className="font-medium text-primary">{end}</span> de{' '}
+          <span className="font-medium text-primary">{totalItems}</span> resultados
+        </span>
 
-        {/* Page size selector with better design */}
         {onPageSizeChange && (
-          <div className="flex items-center gap-2 px-3 py-2 glass rounded-xl border border-glassBorder/30">
-            <span className="text-sm text-tertiary hidden sm:inline">Mostrar:</span>
-            <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-secondary">Por página:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
+              className="px-2 py-1 glass rounded-lg border border-glassBorder text-sm focus:border-primary focus:outline-none transition-colors"
+            >
               {pageSizeOptions.map(size => (
-                <button
-                  key={size}
-                  onClick={() => onPageSizeChange(size)}
-                  className={cn(
-                    "px-3 py-1.5 text-sm rounded-lg transition-all duration-200",
-                    pageSize === size
-                      ? "bg-primary text-white shadow-lg shadow-primary/20"
-                      : "hover:bg-white/5 text-secondary hover:text-primary"
-                  )}
-                >
-                  {size}
-                </button>
+                <option key={size} value={size}>{size}</option>
               ))}
-            </div>
+            </select>
           </div>
         )}
       </div>
 
-      {/* Right side - Page navigation with improved design */}
-      <div className="flex items-center">
-        {/* First and Previous buttons group */}
-        <div className="flex items-center mr-2">
-          {/* First page button */}
-          <button
-            onClick={() => onPageChange(1)}
-            disabled={currentPage === 1}
-            className={cn(
-              "p-2 glass rounded-l-xl transition-all duration-200 border-y border-l border-glassBorder/30",
-              currentPage === 1
-                ? "opacity-40 cursor-not-allowed"
-                : "hover:bg-white/5 hover:border-primary/30 group"
-            )}
-            aria-label="Primera página"
-          >
-            <Icons.chevronLeft className={cn(
-              "w-4 h-4 transition-transform",
-              currentPage !== 1 && "group-hover:-translate-x-0.5"
-            )} />
-            <Icons.chevronLeft className={cn(
-              "w-4 h-4 -ml-3 transition-transform",
-              currentPage !== 1 && "group-hover:-translate-x-0.5"
-            )} />
-          </button>
+      {/* Right side - Page navigation */}
+      <div className="flex items-center gap-1">
+        {/* Previous button */}
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className={cn(
+            "p-2 glass rounded-lg transition-all",
+            currentPage === 1
+              ? "opacity-50 cursor-not-allowed"
+              : "hover:bg-white/5 hover:border-primary"
+          )}
+        >
+          <Icons.chevronLeft className="w-4 h-4" />
+        </button>
 
-          {/* Previous button */}
-          <button
-            onClick={() => onPageChange(currentPage - 1)}
-            disabled={currentPage === 1}
-            className={cn(
-              "p-2 glass rounded-r-xl transition-all duration-200 border-y border-r border-glassBorder/30",
-              currentPage === 1
-                ? "opacity-40 cursor-not-allowed"
-                : "hover:bg-white/5 hover:border-primary/30 group"
+        {/* Page numbers */}
+        {getPageNumbers().map((page, index) => (
+          <React.Fragment key={index}>
+            {page === '...' ? (
+              <span className="px-2 text-secondary">...</span>
+            ) : (
+              <button
+                onClick={() => onPageChange(page as number)}
+                className={cn(
+                  "min-w-[32px] h-8 px-2 rounded-lg transition-all",
+                  currentPage === page
+                    ? "bg-primary text-white font-medium"
+                    : "glass hover:bg-white/5 hover:border-primary text-secondary"
+                )}
+              >
+                {page}
+              </button>
             )}
-            aria-label="Página anterior"
-          >
-            <Icons.chevronLeft className={cn(
-              "w-4 h-4 transition-transform",
-              currentPage !== 1 && "group-hover:-translate-x-0.5"
-            )} />
-          </button>
-        </div>
+          </React.Fragment>
+        ))}
 
-        {/* Page numbers with better styling */}
-        <div className="flex items-center gap-1 px-2">
-          {getPageNumbers().map((page, index) => (
-            <React.Fragment key={index}>
-              {page === '...' ? (
-                <span className="px-2 text-tertiary select-none">⋯</span>
-              ) : (
-                <button
-                  onClick={() => onPageChange(page as number)}
-                  className={cn(
-                    "min-w-[36px] h-9 px-3 rounded-xl font-medium text-sm",
-                    "transition-all duration-200 relative",
-                    currentPage === page
-                      ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-lg shadow-primary/25 scale-105"
-                      : "glass hover:bg-white/5 hover:border-primary/30 text-secondary hover:text-primary border border-transparent"
-                  )}
-                >
-                  {page}
-                  {currentPage === page && (
-                    <div className="absolute inset-0 rounded-xl bg-white/10 animate-pulse" />
-                  )}
-                </button>
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-
-        {/* Next and Last buttons group */}
-        <div className="flex items-center ml-2">
-          {/* Next button */}
-          <button
-            onClick={() => onPageChange(currentPage + 1)}
-            disabled={currentPage === totalPages}
-            className={cn(
-              "p-2 glass rounded-l-xl transition-all duration-200 border-y border-l border-glassBorder/30",
-              currentPage === totalPages
-                ? "opacity-40 cursor-not-allowed"
-                : "hover:bg-white/5 hover:border-primary/30 group"
-            )}
-            aria-label="Página siguiente"
-          >
-            <Icons.chevronRight className={cn(
-              "w-4 h-4 transition-transform",
-              currentPage !== totalPages && "group-hover:translate-x-0.5"
-            )} />
-          </button>
-
-          {/* Last page button */}
-          <button
-            onClick={() => onPageChange(totalPages)}
-            disabled={currentPage === totalPages}
-            className={cn(
-              "p-2 glass rounded-r-xl transition-all duration-200 border-y border-r border-glassBorder/30",
-              currentPage === totalPages
-                ? "opacity-40 cursor-not-allowed"
-                : "hover:bg-white/5 hover:border-primary/30 group"
-            )}
-            aria-label="Última página"
-          >
-            <Icons.chevronRight className={cn(
-              "w-4 h-4 transition-transform",
-              currentPage !== totalPages && "group-hover:translate-x-0.5"
-            )} />
-            <Icons.chevronRight className={cn(
-              "w-4 h-4 -ml-3 transition-transform",
-              currentPage !== totalPages && "group-hover:translate-x-0.5"
-            )} />
-          </button>
-        </div>
+        {/* Next button */}
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className={cn(
+            "p-2 glass rounded-lg transition-all",
+            currentPage === totalPages
+              ? "opacity-50 cursor-not-allowed"
+              : "hover:bg-white/5 hover:border-primary"
+          )}
+        >
+          <Icons.chevronRight className="w-4 h-4" />
+        </button>
       </div>
-
-      {/* Quick jump input for large datasets */}
-      {totalPages > 10 && (
-        <div className="flex items-center gap-2 px-3 py-2 glass rounded-xl border border-glassBorder/30">
-          <span className="text-sm text-tertiary">Ir a:</span>
-          <input
-            type="number"
-            min={1}
-            max={totalPages}
-            value={currentPage}
-            onChange={(e) => {
-              const page = parseInt(e.target.value)
-              if (page >= 1 && page <= totalPages) {
-                onPageChange(page)
-              }
-            }}
-            className="w-16 px-2 py-1 text-sm text-center bg-white/5 rounded-lg border border-glassBorder/30
-                     focus:border-primary focus:outline-none transition-colors"
-          />
-          <span className="text-sm text-tertiary">/ {totalPages}</span>
-        </div>
-      )}
     </div>
   )
 }
