@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts'
 import { SmartRechartsTooltip } from '../../components/SmartRechartsTooltip'
-import { Card, ChartContainer, Dropdown } from '../../ui'
-import { Check, ChevronDown } from 'lucide-react'
+import { Card, ChartContainer, Dropdown, Checkbox } from '../../ui'
+import { ChevronDown } from 'lucide-react'
 import { formatCurrency } from '../../lib/utils'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useHistoricalData } from '../../hooks/useHistoricalData'
@@ -145,16 +145,11 @@ export function RevenueChart({
                 className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 transition-colors text-left"
               >
                 <span className="text-sm text-primary">{option.label}</span>
-                <div className={cn(
-                  "w-4 h-4 rounded border transition-colors",
-                  selectedMetrics.includes(option.key)
-                    ? "bg-blue-500 border-blue-500"
-                    : "border-tertiary/50"
-                )}>
-                  {selectedMetrics.includes(option.key) && (
-                    <Check className="w-3 h-3 text-white" />
-                  )}
-                </div>
+                <Checkbox
+                  checked={selectedMetrics.includes(option.key)}
+                  onChange={() => toggleMetric(option.key)}
+                  className="pointer-events-none"
+                />
               </button>
             ))}
           </div>
