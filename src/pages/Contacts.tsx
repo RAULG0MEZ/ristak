@@ -210,7 +210,7 @@ export function Contacts() {
       {
         id: 'company',
         label: 'Empresa',
-        visible: true,
+        visible: false,
         align: 'left',
         render: (value: any) => <span className="text-secondary">{value || '—'}</span>
       },

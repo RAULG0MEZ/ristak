@@ -23,14 +23,39 @@ export const endOfMonth = endOfMonthUTC
 
 export function DateProvider({ children }: DateProviderProps) {
   // Inicializar con "Este mes" como rango predeterminado
+  // pero primero intentar cargar desde sessionStorage
   const now = new Date()
-  const [dateRange, setDateRangeState] = useState<DateRange>({
-    start: startOfMonth(now),
-    end: endOfMonth(now)
-  })
+
+  const getInitialRange = (): DateRange => {
+    // Intentar cargar de sessionStorage (solo persiste durante la sesión)
+    const stored = sessionStorage.getItem('dateRange')
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+        return {
+          start: new Date(parsed.start),
+          end: new Date(parsed.end)
+        }
+      } catch (e) {
+        // Si hay error, usar valores por defecto
+      }
+    }
+    // Valores por defecto: Este mes
+    return {
+      start: startOfMonth(now),
+      end: endOfMonth(now)
+    }
+  }
+
+  const [dateRange, setDateRangeState] = useState<DateRange>(getInitialRange())
 
   const setDateRange = (newRange: DateRange) => {
     setDateRangeState(newRange)
+    // Guardar en sessionStorage para persistir durante la sesión
+    sessionStorage.setItem('dateRange', JSON.stringify({
+      start: newRange.start.toISOString(),
+      end: newRange.end.toISOString()
+    }))
   }
 
   return (
