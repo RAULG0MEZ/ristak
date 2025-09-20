@@ -67,7 +67,7 @@ export function RevenueChart({
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>(() => {
     // Cargar configuración del localStorage
     const saved = localStorage.getItem('revenue-chart-metrics')
-    return saved ? JSON.parse(saved) : ['income']
+    return saved ? JSON.parse(saved) : ['income', 'netIncome', 'expenses'] // Las 3 opciones por defecto
   })
 
   const [dropdownOpen, setDropdownOpen] = useState(false)
