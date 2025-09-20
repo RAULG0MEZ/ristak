@@ -1,9 +1,10 @@
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../../.env.local') });
 
-const { tenantMiddleware, optionalTenantMiddleware } = require('./middleware/tenant.middleware');
+const { requireAuth, optionalAuth } = require('./middleware/auth.middleware');
+const { attachUserTimezone } = require('./middleware/timezone.middleware');
+const authRoutes = require('./routes/auth.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const contactsRoutes = require('./routes/contacts.routes');
 const paymentsRoutes = require('./routes/payments.routes');
@@ -12,68 +13,53 @@ const campaignsRoutes = require('./routes/campaigns.routes');
 const metaRoutes = require('./routes/meta.routes');
 const importRoutes = require('./routes/import.routes');
 const deployRoutes = require('./routes/deploy');
-const subaccountRoutes = require('./routes/subaccount.routes');
 const webhookRoutes = require('./routes/webhooks.routes');
 const configRoutes = require('./routes/config.routes');
 const trackingRoutes = require('./routes/tracking.routes');
+const settingsRoutes = require('./routes/settings.routes');
+
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
+// En desarrollo, crear un middleware que auto-loguee
+const devAuth = (req, res, next) => {
+  // Si ya hay usuario (de un token válido), continuar
+  if (req.user) {
+    return next();
+  }
+
+  // En desarrollo, crear usuario automático
+  req.user = {
+    userId: 'dev-user',
+    email: 'dev@ristak.local',
+    role: 'admin'
+  };
+
+  next();
+};
+
+// En desarrollo usar devAuth, en producción requireAuth
+const protectedAuth = isDevelopment ? devAuth : requireAuth;
 
 const app = express();
 const PORT = process.env.API_PORT || 3002;
 
-// Middleware configuration
-// Excluir rutas de tracking del CORS global
-app.use((req, res, next) => {
-  // Si es una ruta de tracking, saltear el CORS global
-  if (req.path.startsWith('/api/tracking/')) {
-    return next();
+// Honrar cabeceras X-Forwarded-* (Cloudflare / Nginx) para hostname y protocolo
+app.set('trust proxy', true);
+
+// CORS simple para desarrollo - permite todo
+const cors = (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept');
+
+  // Manejar preflight
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
   }
+  next();
+};
 
-  // Aplicar CORS normal para otras rutas
-  cors({
-    origin: function (origin, callback) {
-    // Construir lista de orígenes permitidos dinámicamente
-    const allowedOrigins = [];
-
-    // Agregar orígenes de desarrollo
-    if (process.env.NODE_ENV !== 'production') {
-      const frontendPort = process.env.VITE_PORT || '5173';
-      const apiPort = process.env.API_PORT || '3002';
-      allowedOrigins.push(
-        `http://localhost:${frontendPort}`,
-        `http://127.0.0.1:${frontendPort}`,
-        `http://localhost:${apiPort}`,
-        `http://127.0.0.1:${apiPort}`
-      );
-    }
-
-    // Agregar hosts permitidos desde variables de entorno
-    if (process.env.ALLOWED_HOSTS) {
-      const hosts = process.env.ALLOWED_HOSTS.split(',');
-      hosts.forEach(host => {
-        allowedOrigins.push(`https://${host.trim()}`);
-        allowedOrigins.push(`http://${host.trim()}`);
-      });
-    }
-
-    // Permitir si no hay origen (Postman, curl) o si está en la lista
-    // También permitir 'null' para archivos HTML abiertos directamente
-    if (!origin || origin === 'null' || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      // Permitir cualquier puerto de localhost
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS: ' + origin));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-  })(req, res, next);
-});
-
+app.use(cors);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -86,26 +72,45 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Aplicar middleware de tenant a las rutas principales
-// Estas rutas REQUIEREN tenant authentication
-app.use('/api/dashboard', tenantMiddleware, dashboardRoutes);
-app.use('/api/contacts', tenantMiddleware, contactsRoutes);
-app.use('/api/payments', tenantMiddleware, paymentsRoutes);
-app.use('/api/reports', tenantMiddleware, reportsRoutes);
-app.use('/api/campaigns', tenantMiddleware, campaignsRoutes);
-app.use('/api/import', tenantMiddleware, importRoutes);
-app.use('/api/subaccount', tenantMiddleware, subaccountRoutes);
+// Rutas de autenticación (sin middleware de tenant)
+app.use('/api/auth', authRoutes);
 
-// Estas rutas pueden funcionar con o sin tenant
-app.use('/api/meta', optionalTenantMiddleware, metaRoutes);
-app.use('/api/config', optionalTenantMiddleware, configRoutes);
-app.use('/api/tracking', optionalTenantMiddleware, trackingRoutes);
+// Middleware especial para Meta: OAuth es público, el resto protegido
+app.use('/api/meta', (req, res, next) => {
+  // Las rutas de OAuth no requieren autenticación
+  const publicPaths = ['/oauth/start', '/oauth/callback'];
+  const isPublicPath = publicPaths.some(path => req.path.startsWith(path));
+
+  if (isPublicPath) {
+    // OAuth paths: continuar sin autenticación
+    next();
+  } else {
+    // Otras rutas de Meta: requieren autenticación
+    protectedAuth(req, res, next);
+  }
+}, metaRoutes);
+
+// Rutas autenticadas con timezone middleware
+app.use('/api/dashboard', protectedAuth, attachUserTimezone, dashboardRoutes);
+app.use('/api/contacts', protectedAuth, attachUserTimezone, contactsRoutes);
+app.use('/api/payments', protectedAuth, attachUserTimezone, paymentsRoutes);
+app.use('/api/reports', protectedAuth, attachUserTimezone, reportsRoutes);
+app.use('/api/campaigns', protectedAuth, attachUserTimezone, campaignsRoutes);
+app.use('/api/import', protectedAuth, attachUserTimezone, importRoutes);
+app.use('/api/config', protectedAuth, configRoutes);
+app.use('/api/settings', protectedAuth, attachUserTimezone, settingsRoutes);
+app.use('/api/tracking', trackingRoutes); // Tracking no necesita auth
 
 // Rutas directas para dominios de tracking personalizados
 // Detecta si viene de un dominio de tracking y sirve las rutas sin /api/tracking
-app.get('/snip.js', trackingRoutes);
-app.post('/collect', trackingRoutes);
-app.options('/collect', trackingRoutes);
+app.get('/snip.js', (req, res, next) => {
+  req.url = '/snip.js';
+  trackingRoutes(req, res, next);
+});
+app.post('/collect', (req, res, next) => {
+  req.url = '/collect';
+  trackingRoutes(req, res, next);
+});
 
 // Rutas públicas (sin tenant middleware)
 app.use('/api/deploy', deployRoutes);
@@ -132,7 +137,7 @@ app.use((req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log('🚀 Ristak PRO API Server');
+  console.log('🚀 Ristak API Server');
   console.log(`📍 Running on: http://localhost:${PORT}`);
   console.log(`✅ Health check: http://localhost:${PORT}/health`);
   console.log(`📊 Dashboard API: http://localhost:${PORT}/api/dashboard`);
@@ -143,4 +148,16 @@ app.listen(PORT, () => {
   console.log(`🔁 Meta API: http://localhost:${PORT}/api/meta`);
   console.log(`📥 Import API: http://localhost:${PORT}/api/import`);
   console.log(`🚀 Deploy API: http://localhost:${PORT}/api/deploy`);
+
+  // Iniciar cron job de sincronización con Cloudflare (solo en producción)
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const trackingSyncJob = require('./jobs/tracking-sync.job');
+      trackingSyncJob.start();
+    } catch (error) {
+      console.error('⚠️ Could not start tracking sync job:', error.message);
+    }
+  } else {
+    console.log('ℹ️ Tracking sync cron job disabled (development mode)');
+  }
 });

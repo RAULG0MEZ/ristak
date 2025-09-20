@@ -9,7 +9,7 @@
   --color-background-secondary: #141518;
   --color-background-tertiary: #1a1b1f;
   --color-background-glass: rgba(255, 255, 255, 0.03);
-  --color-background-glassBorder: rgba(255, 255, 255, 0.08);
+  --color-background-glassBorder: rgba(100, 100, 100, 0.15);
 
   /* Text */
   --color-text-primary: #ffffff;
@@ -42,7 +42,7 @@
   /* Effects */
   --effect-glassMorphism-background: rgba(255, 255, 255, 0.03);
   --effect-glassMorphism-backdropFilter: blur(10px);
-  --effect-glassMorphism-border: 1px solid rgba(255, 255, 255, 0.08);
+  --effect-glassMorphism-border: 1px solid rgba(100, 100, 100, 0.15);
 }
 
 body.light {
@@ -522,4 +522,62 @@ body.light {
   .only-light { display: none; }
   body.dark .only-dark { display: block; }
   body.light .only-light { display: block; }
+
+  /* Glass morphism mejorado para modales */
+  .glass-morphism {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  body.light .glass-morphism {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+
+  .glass-morphism-active {
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  body.light .glass-morphism-active {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+  }
+
+  /* Scrollbar personalizado delgado */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    transition: background-color 0.2s;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+  }
+
+  body.light .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.1);
+  }
+
+  body.light .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.2);
+  }
 }

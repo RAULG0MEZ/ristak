@@ -1,12 +1,12 @@
-import React, { useState, useMemo, useEffect } from 'react'
-import { PageContainer, Card, TableWithHierarchy, Badge, Button, KPICard, DateRangePicker, TabList, Dropdown, DatePicker, ToastManager, Modal, ChartContainer } from '../ui'
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { PageContainer, Card, TableWithHierarchy, Badge, Button, KPICard, DateRangePicker, TabList, Dropdown, DatePicker, ToastManager, Modal, ChartContainer, ContactDetailsModal } from '../ui'
 import { useColumnsConfig } from '../hooks/useColumnsConfig'
 import { Icons } from '../icons'
 import { formatCurrency, formatNumber, cn } from '../lib/utils'
+import { dateToApiString, formatDateShort, formatDateLong, subtractMonths, createDateInTimezone } from '../lib/dateUtils'
 import { useDateRange } from '../contexts/DateContext'
 import { useCampaigns } from '../hooks/useCampaigns'
-import { useContacts } from '../hooks/useContacts'
-import { getApiUrl } from '../config/api'
+import { getApiUrl, fetchWithAuth } from '../config/api'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend } from 'recharts'
 import { SmartRechartsTooltip } from '../components/SmartRechartsTooltip'
 import { useTheme } from '../contexts/ThemeContext'
@@ -75,8 +75,17 @@ interface CampaignMetrics {
 export function Campaigns() {
   const { dateRange, setDateRange } = useDateRange()
   const { campaigns, loading } = useCampaigns({ start: dateRange.start, end: dateRange.end })
-  const { contacts } = useContacts({ start: dateRange.start, end: dateRange.end })
   const { theme, themeData } = useTheme()
+
+  // NUEVO: Usar ref para mantener las campañas
+  const campaignsRef = useRef<any[]>([])
+
+  // Actualizar ref cuando cambien las campañas
+  useEffect(() => {
+    if (campaigns && campaigns.length > 0) {
+      campaignsRef.current = campaigns
+    }
+  }, [campaigns])
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'paused'>('all')
@@ -99,23 +108,43 @@ export function Campaigns() {
   const [configError, setConfigError] = useState<string | null>(null)
   const [toasts, setToasts] = useState<Array<{id: string; type: 'success'|'error'|'info'|'warning'; title: string; message?: string}>>([])
   
-  // Detail modal state
-  const [detailModal, setDetailModal] = useState<{
+
+  // Visitors modal state
+  const [visitorsModal, setVisitorsModal] = useState<{
     isOpen: boolean
-    type: 'leads' | 'appointments' | 'sales' | null
-    data: any
-    level: 'campaign' | 'adset' | 'ad'
+    data: any[]
+    loading: boolean
     name: string
-    rowId?: string
+    adIds: string[]
+    selectedVisitorId: string | null
+    searchQuery: string
   }>({
     isOpen: false,
-    type: null,
-    data: null,
-    level: 'campaign',
-    name: ''
+    data: [],
+    loading: false,
+    name: '',
+    adIds: [],
+    selectedVisitorId: null,
+    searchQuery: ''
   })
-  const [selectedContact, setSelectedContact] = useState<any>(null)
-  const [showPayments, setShowPayments] = useState(false)
+
+  // Contacts details modal state
+  const [contactsModal, setContactsModal] = useState<{
+    isOpen: boolean
+    data: any[]
+    loading: boolean
+    title: string
+    subtitle: string
+    type: 'leads' | 'appointments' | 'sales' | null
+  }>({
+    isOpen: false,
+    data: [],
+    loading: false,
+    title: '',
+    subtitle: '',
+    type: null
+  })
+
 
   const addToast = (type: 'success'|'error'|'info'|'warning', title: string, message?: string) => {
     const id = Math.random().toString(36).substring(2, 9)
@@ -130,7 +159,7 @@ export function Campaigns() {
     let timer: any
     const poll = async () => {
       try {
-        const r = await fetch(getApiUrl('/meta/sync/status'))
+        const r = await fetchWithAuth(getApiUrl('/meta/sync/status'))
         const j = await r.json()
         setSyncRunning(Boolean(j?.data?.running))
       } catch {}
@@ -145,9 +174,9 @@ export function Campaigns() {
     async function fetchCampaignMetrics() {
       try {
         setMetricsLoading(true)
-        const startDate = dateRange.start.toISOString().split('T')[0]
-        const endDate = dateRange.end.toISOString().split('T')[0]
-        const response = await fetch(
+        const startDate = dateToApiString(dateRange.start)
+        const endDate = dateToApiString(dateRange.end)
+        const response = await fetchWithAuth(
           getApiUrl(`/campaigns/metrics?start=${startDate}&end=${endDate}`)
         )
         if (response.ok) {
@@ -164,7 +193,7 @@ export function Campaigns() {
   }, [dateRange.start, dateRange.end])
 
   const minSinceDate = useMemo(() => {
-    const d = new Date(); d.setMonth(d.getMonth() - 35); return d.toISOString().slice(0,10)
+    return dateToApiString(subtractMonths(createDateInTimezone(), 35))
   }, [])
 
   const handleMetaSyncClick = () => {
@@ -176,7 +205,7 @@ export function Campaigns() {
       if (ev.data.type === 'meta-oauth-success') {
         window.removeEventListener('message', onMsg)
         try {
-          const res = await fetch(getApiUrl('/meta/adaccounts'))
+          const res = await fetchWithAuth(getApiUrl('/meta/adaccounts'))
           
           if (!res.ok) {
             throw new Error(`Error al cargar cuentas de anuncios: ${res.status}`)
@@ -189,9 +218,7 @@ export function Campaigns() {
           setSelectedAdAccount('')
           setSelectedPixel('')
           // Set default date to 34 months ago
-          const defaultDate = new Date()
-          defaultDate.setMonth(defaultDate.getMonth() - 34)
-          setSinceDate(defaultDate.toISOString().slice(0, 10))
+          setSinceDate(dateToApiString(subtractMonths(createDateInTimezone(), 34)))
           setSchedule('1h')
           setConfigError(null)
           
@@ -216,7 +243,7 @@ export function Campaigns() {
     }
     
     try {
-      const res = await fetch(getApiUrl(`/meta/pixels?ad_account_id=${encodeURIComponent(id)}`))
+      const res = await fetchWithAuth(getApiUrl(`/meta/pixels?ad_account_id=${encodeURIComponent(id)}`))
       
       if (!res.ok) {
         throw new Error(`Error al cargar pixels: ${res.status}`)
@@ -245,7 +272,7 @@ export function Campaigns() {
     setConfigError(null)
     
     try {
-      const response = await fetch(getApiUrl('/meta/configure'), {
+      const response = await fetchWithAuth(getApiUrl('/meta/configure'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -305,21 +332,22 @@ export function Campaigns() {
     const fetchChartData = async () => {
       try {
         setChartLoading(true)
-        const url = getApiUrl(`/campaigns/chart?start=${dateRange.start.toISOString()}&end=${dateRange.end.toISOString()}`)
-        const response = await fetch(url)
+        const url = getApiUrl(`/campaigns/chart?start=${dateToApiString(dateRange.start)}&end=${dateToApiString(dateRange.end)}`)
+        const response = await fetchWithAuth(url)
         if (!response.ok) {
           throw new Error('Failed to fetch chart data')
         }
         const result = await response.json()
-        const formattedData = (result.data || []).map((item: any) => {
-          // Parse date correctly for display in chart
-          const dateObj = new Date(item.date + 'T12:00:00')
-          return {
-            date: dateObj.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }),
-            gastado: Math.round(item.spend || 0),
-            retorno: Math.round(item.revenue || 0)
-          }
-        })
+        const formattedData = (result.data || [])
+          .filter((item: any) => item.spend > 0 || item.revenue > 0)
+          .map((item: any) => {
+            const dateObj = new Date(item.date)
+            return {
+              date: formatDateShort(dateObj),
+              gastado: item.spend || 0,
+              retorno: item.revenue || 0
+            }
+          })
         setChartData(formattedData)
       } catch (error) {
         console.error('Error fetching chart data:', error)
@@ -411,351 +439,597 @@ export function Campaigns() {
     setSortDirection(direction)
   }
 
+  // Definir columnas SIN useMemo para que siempre usen el dateRange actual
+  // IMPORTANTE: Esto se recrea en cada render para evitar closures viejos
+  const columnDefinitions = [
+    {
+      id: 'name',
+      label: 'Nombre',
+      visible: true,
+      fixed: true,
+      align: 'left',
+      render: (value: any) => (
+        <span className="font-medium text-primary">{value}</span>
+      )
+    },
+    {
+      id: 'spend',
+      label: 'Inversión',
+      align: 'right' as const,
+      visible: true,
+      render: (value: any) => (
+        <span>{formatCurrency(value)}</span>
+      )
+    },
+    {
+      id: 'reach',
+      label: 'Alcance',
+      align: 'right' as const,
+      visible: false,
+      render: (value: any) => (
+        <span>{formatNumber(value)}</span>
+      )
+    },
+    {
+      id: 'clicks',
+      label: 'Clicks',
+      align: 'right' as const,
+      visible: true,
+      render: (value: any) => (
+        <span>{formatNumber(value)}</span>
+      )
+    },
+    {
+      id: 'cpc',
+      label: 'CPC',
+      align: 'right' as const,
+      visible: false,
+      render: (value: any) => (
+        <span>{formatCurrency(value)}</span>
+      )
+    },
+    {
+      id: 'visitors',
+      label: 'Visitantes',
+      align: 'right' as const,
+      visible: true,
+      render: (value: any, row: any) => (
+        <span className="inline-flex items-center gap-1">
+          {value > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                // Pass the current campaigns data directly
+                handleShowVisitorsWithData(row, campaigns)
+              }}
+              className="text-tertiary hover:text-primary transition-colors"
+            >
+              <Icons.search className="w-3 h-3" />
+            </button>
+          )}
+          {formatNumber(value)}
+        </span>
+      )
+    },
+    {
+      id: 'cpv',
+      label: 'CPV',
+      align: 'right' as const,
+      visible: false,
+      render: (value: any) => (
+        <span>{formatCurrency(value)}</span>
+      )
+    },
+    {
+      id: 'leads',
+      label: 'Leads',
+      align: 'right' as const,
+      visible: true,
+      render: (value: any, row: any) => (
+        <span className="inline-flex items-center gap-1">
+          {value > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleShowContactDetails(row, 'leads', value)
+              }}
+              className="text-tertiary hover:text-primary transition-colors"
+            >
+              <Icons.search className="w-3 h-3" />
+            </button>
+          )}
+          {formatNumber(value)}
+        </span>
+      )
+    },
+    {
+      id: 'cpl',
+      label: 'CPL',
+      align: 'right' as const,
+      visible: false,
+      render: (value: any) => (
+        <span>{formatCurrency(value)}</span>
+      )
+    },
+    {
+      id: 'appointments',
+      label: 'Citas',
+      align: 'right' as const,
+      visible: false,
+      render: (value: any, row: any) => (
+        <span className="inline-flex items-center gap-1">
+          {value > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleShowContactDetails(row, 'appointments', value)
+              }}
+              className="text-tertiary hover:text-primary transition-colors"
+            >
+              <Icons.search className="w-3 h-3" />
+            </button>
+          )}
+          {formatNumber(value)}
+        </span>
+      )
+    },
+    {
+      id: 'sales',
+      label: 'Ventas',
+      align: 'right' as const,
+      visible: true,
+      render: (value: any, row: any) => (
+        <span className="inline-flex items-center gap-1">
+          {value > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleShowContactDetails(row, 'sales', value)
+              }}
+              className="text-tertiary hover:text-primary transition-colors"
+            >
+              <Icons.search className="w-3 h-3" />
+            </button>
+          )}
+          {formatNumber(value)}
+        </span>
+      )
+    },
+    {
+      id: 'cac',
+      label: 'CAC',
+      align: 'right' as const,
+      visible: false,
+      render: (value: any) => (
+        <span>{formatCurrency(value)}</span>
+      )
+    },
+    {
+      id: 'revenue',
+      label: 'Ingresos',
+      align: 'right' as const,
+      visible: true,
+      render: (value: any, row: any) => (
+        <span className={cn(
+          "font-medium",
+          value > row.spend ? "text-success" : "text-error"
+        )}>
+          {formatCurrency(value)}
+        </span>
+      )
+    },
+    {
+      id: 'roas',
+      label: 'ROAS',
+      align: 'right' as const,
+      visible: true,
+      render: (value: any) => (
+        <span>{value.toFixed(2)}x</span>
+      )
+    }
+  ] // Sin useMemo para evitar closures viejos
+
   // Configuración de columnas con persistencia
+  // useColumnsConfig SOLO maneja orden y visibilidad
+  // Las columnas con sus funciones render vienen frescas cada render
   const { columns, handleColumnReorder, handleColumnVisibilityChange } = useColumnsConfig(
     'campaigns_columns_config',
-    [
-      {
-        id: 'name',
-        label: 'Nombre',
-        visible: true,
-        fixed: true,
-        align: 'left',
-        render: (value: any) => (
-          <span className="font-medium text-primary">{value}</span>
-        )
-      },
-      {
-        id: 'spend',
-        label: 'Inversión',
-        align: 'right' as const,
-        visible: true,
-        render: (value: any) => (
-          <span>{formatCurrency(value)}</span>
-        )
-      },
-      {
-        id: 'reach',
-        label: 'Alcance',
-        align: 'right' as const,
-        visible: false,
-        render: (value: any) => (
-          <span>{formatNumber(value)}</span>
-        )
-      },
-      {
-        id: 'clicks',
-        label: 'Clicks',
-        align: 'right' as const,
-        visible: true,
-        render: (value: any) => (
-          <span>{formatNumber(value)}</span>
-        )
-      },
-      {
-        id: 'cpc',
-        label: 'CPC',
-        align: 'right' as const,
-        visible: false,
-        render: (value: any) => (
-          <span>{formatCurrency(value)}</span>
-        )
-      },
-      {
-        id: 'visitors',
-        label: 'Visitantes',
-        align: 'right' as const,
-        visible: false,
-        render: (value: any) => (
-          <span>{formatNumber(value)}</span>
-        )
-      },
-      {
-        id: 'cpv',
-        label: 'CPV',
-        align: 'right' as const,
-        visible: false,
-        render: (value: any) => (
-          <span>{formatCurrency(value)}</span>
-        )
-      },
-      {
-        id: 'leads',
-        label: 'Leads',
-        align: 'right' as const,
-        visible: true,
-        render: (value: any, row: any) => (
-          <span className="inline-flex items-center gap-1">
-            {value > 0 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  const level = row.id.startsWith('campaign:') ? 'campaign' : 
-                               row.id.startsWith('adset:') ? 'adset' : 'ad'
-                  const originalData = findOriginalData(row.id)
-                  setDetailModal({
-                    isOpen: true,
-                    type: 'leads',
-                    data: originalData || row,
-                    level,
-                    name: row.name,
-                    rowId: row.id
-                  })
-                }}
-                className="text-tertiary hover:text-primary transition-colors"
-              >
-                <Icons.search className="w-3 h-3" />
-              </button>
-            )}
-            {formatNumber(value)}
-          </span>
-        )
-      },
-      {
-        id: 'cpl',
-        label: 'CPL',
-        align: 'right' as const,
-        visible: false,
-        render: (value: any) => (
-          <span>{formatCurrency(value)}</span>
-        )
-      },
-      {
-        id: 'appointments',
-        label: 'Citas',
-        align: 'right' as const,
-        visible: false,
-        render: (value: any, row: any) => (
-          <span className="inline-flex items-center gap-1">
-            {value > 0 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  const level = row.id.startsWith('campaign:') ? 'campaign' : 
-                               row.id.startsWith('adset:') ? 'adset' : 'ad'
-                  const originalData = findOriginalData(row.id)
-                  setDetailModal({
-                    isOpen: true,
-                    type: 'appointments',
-                    data: originalData || row,
-                    level,
-                    name: row.name,
-                    rowId: row.id
-                  })
-                }}
-                className="text-tertiary hover:text-primary transition-colors"
-              >
-                <Icons.search className="w-3 h-3" />
-              </button>
-            )}
-            {formatNumber(value)}
-          </span>
-        )
-      },
-      {
-        id: 'sales',
-        label: 'Ventas',
-        align: 'right' as const,
-        visible: true,
-        render: (value: any, row: any) => (
-          <span className="inline-flex items-center gap-1">
-            {value > 0 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  const level = row.id.startsWith('campaign:') ? 'campaign' : 
-                               row.id.startsWith('adset:') ? 'adset' : 'ad'
-                  const originalData = findOriginalData(row.id)
-                  setDetailModal({
-                    isOpen: true,
-                    type: 'sales',
-                    data: originalData || row,
-                    level,
-                    name: row.name,
-                    rowId: row.id
-                  })
-                }}
-                className="text-tertiary hover:text-primary transition-colors"
-              >
-                <Icons.search className="w-3 h-3" />
-              </button>
-            )}
-            {formatNumber(value)}
-          </span>
-        )
-      },
-      {
-        id: 'cac',
-        label: 'CAC',
-        align: 'right' as const,
-        visible: false,
-        render: (value: any) => (
-          <span>{formatCurrency(value)}</span>
-        )
-      },
-      {
-        id: 'revenue',
-        label: 'Ingresos',
-        align: 'right' as const,
-        visible: true,
-        render: (value: any, row: any) => (
-          <span className={cn(
-            "font-medium",
-            value > row.spend ? "text-success" : "text-error"
-          )}>
-            {formatCurrency(value)}
-          </span>
-        )
-      },
-      {
-        id: 'roas',
-        label: 'ROAS',
-        align: 'right' as const,
-        visible: true,
-        render: (value: any) => (
-          <span>{value.toFixed(2)}x</span>
-        )
-      }
-    ]
+    columnDefinitions // Estas columnas se recrean cada render para evitar closures viejos
   )
 
-  // Convertir datos a estructura jerárquica para la tabla
-  const hierarchicalData = useMemo(() => {
-    return filteredCampaigns.map(campaign => ({
-      data: {
-        id: `campaign:${campaign.campaignId}`,
-        name: campaign.campaignName,
-        status: campaign.status,
-        spend: campaign.spend,
-        reach: campaign.reach,
-        clicks: campaign.clicks,
-        cpc: campaign.cpc,
-        visitors: campaign.visitors,
-        cpv: campaign.cpv,
-        leads: campaign.leads,
-        cpl: campaign.cpl,
-        appointments: campaign.appointments,
-        sales: campaign.sales,
-        cac: campaign.cac,
-        revenue: campaign.revenue,
-        roas: campaign.roas
-      },
-      children: campaign.adSets.map(adSet => ({
-        data: {
-          id: `adset:${adSet.adSetId}`,
-          name: adSet.adSetName,
-          status: adSet.status,
-          spend: adSet.spend,
-          reach: adSet.reach,
-          clicks: adSet.clicks,
-          cpc: adSet.cpc,
-          visitors: adSet.visitors,
-          cpv: adSet.cpv,
-          leads: adSet.leads,
-          cpl: adSet.cpl,
-          appointments: adSet.appointments,
-          sales: adSet.sales,
-          cac: adSet.cac,
-          revenue: adSet.revenue,
-          roas: adSet.roas
-        },
-        children: adSet.ads.map(ad => ({
-          data: {
-            id: `ad:${ad.adId}`,
-            name: ad.adName,
-            status: ad.status,
-            spend: ad.spend,
-            reach: ad.reach,
-            clicks: ad.clicks,
-            cpc: ad.cpc,
-            visitors: ad.visitors,
-            cpv: ad.cpv,
-            leads: ad.leads,
-            cpl: ad.cpl,
-            appointments: ad.appointments,
-            sales: ad.sales,
-            cac: ad.cac,
-            revenue: ad.revenue,
-            roas: ad.roas
-          }
-        }))
-      }))
-    }))
-  }, [filteredCampaigns])
+  const normalizeId = (value: unknown) => {
+    if (value === null || value === undefined) return undefined
+    const strValue = String(value).trim()
+    return strValue.length === 0 ? undefined : strValue
+  }
 
-  const getRowId = (row: any) => row.id
-  
-  // Helper function to find the original campaign data structure
-  const findOriginalData = (rowId: string) => {
-    const [type, id] = rowId.split(':')
-    
-    if (type === 'campaign') {
-      return campaigns.find(c => c.campaignId === id)
-    } else if (type === 'adset') {
-      for (const campaign of campaigns) {
-        const adSet = campaign.adSets.find(as => as.adSetId === id)
-        if (adSet) return adSet
-      }
-    } else if (type === 'ad') {
-      for (const campaign of campaigns) {
-        for (const adSet of campaign.adSets) {
-          const ad = adSet.ads.find(a => a.adId === id)
-          if (ad) return ad
-        }
+  // Helper functions para búsqueda en la jerarquía
+  const findCampaignById = (campaignId: string) => {
+    // Comparar tanto con el ID normalizado como sin normalizar
+    const searchId = String(campaignId).trim()
+    return campaigns.find(c =>
+      String(c.campaignId).trim() === searchId ||
+      normalizeId(c.campaignId) === normalizeId(campaignId)
+    )
+  }
+
+  const findAdSetById = (adSetId: string) => {
+    const searchId = String(adSetId).trim()
+    for (const campaign of campaigns) {
+      const adSet = campaign.adSets.find(as =>
+        String(as.adSetId).trim() === searchId ||
+        normalizeId(as.adSetId) === normalizeId(adSetId)
+      )
+      if (adSet) return { adSet, campaign }
+    }
+    return null
+  }
+
+  const findAdById = (adId: string) => {
+    const searchId = String(adId).trim()
+    for (const campaign of campaigns) {
+      for (const adSet of campaign.adSets) {
+        const ad = adSet.ads.find(a =>
+          String(a.adId).trim() === searchId ||
+          normalizeId(a.adId) === normalizeId(adId)
+        )
+        if (ad) return { ad, adSet, campaign }
       }
     }
     return null
   }
 
-  // Helper to compute ad IDs for current modal context robustly
-  const getAdIdsForDetailContext = () => {
-    const ids = new Set<string>()
-    const level = detailModal.level
-    const data = detailModal.data
+  // Función que obtiene ad_ids usando datos pasados como parámetro
+  const getAdIdsByHierarchyFromData = (rowId: string, campaignsData: any[]): string[] => {
+    const [type, id] = rowId.split(':')
+    // Logs removidos para limpiar consola
 
-    // Try to use provided data structure first
-    if (level === 'ad') {
-      const adId = data?.adId
-      if (adId) ids.add(adId)
-    } else if (level === 'adset') {
-      const ads = data?.ads
-      if (Array.isArray(ads)) {
-        for (const ad of ads) if (ad?.adId) ids.add(ad.adId)
-      }
-    } else if (level === 'campaign') {
-      const adSets = data?.adSets
-      if (Array.isArray(adSets)) {
-        for (const set of adSets) {
-          if (Array.isArray(set?.ads)) {
-            for (const ad of set.ads) if (ad?.adId) ids.add(ad.adId)
-          }
+    if (type === 'ad') {
+      return [id]
+    }
+
+    if (type === 'adset') {
+      // Buscar el adset en los datos
+      for (const campaign of campaignsData) {
+        if (!campaign.adSets) {
+          continue
+        }
+        const adSet = campaign.adSets.find((as: any) =>
+          String(as.adSetId).trim() === id
+        )
+        if (adSet) {
+          const adIds = adSet.ads?.map((ad: any) => String(ad.adId).trim()) || []
+          return adIds
         }
       }
     }
 
-    // If nothing collected yet, fallback by resolving from campaigns via rowId
-    if (ids.size === 0 && detailModal.rowId) {
-      const [type, rawId] = detailModal.rowId.split(':')
-      if (type === 'ad') {
-        ids.add(rawId)
-      } else if (type === 'adset') {
-        for (const c of campaigns) {
-          const set = c.adSets?.find((as: any) => as.adSetId === rawId)
-          if (set?.ads) for (const ad of set.ads) if (ad?.adId) ids.add(ad.adId)
-        }
-      } else if (type === 'campaign') {
-        const camp = campaigns.find((c: any) => c.campaignId === rawId)
-        if (camp?.adSets) {
-          for (const set of camp.adSets) {
-            if (Array.isArray(set?.ads)) {
-              for (const ad of set.ads) if (ad?.adId) ids.add(ad.adId)
-            }
-          }
-        }
+    if (type === 'campaign') {
+      // Buscar la campaña en los datos
+      const campaign = campaignsData.find(c =>
+        String(c.campaignId).trim() === id
+      )
+      if (campaign) {
+        const adIds = campaign.adSets?.flatMap((adSet: any) =>
+          adSet.ads?.map((ad: any) => String(ad.adId).trim()) || []
+        ) || []
+        return adIds
       }
     }
 
-    return ids
+    return []
+  }
+
+  // Nueva función simplificada para obtener ad_ids según jerarquía
+  const getAdIdsByHierarchy = (rowId: string): string[] => {
+    const [type, id] = rowId.split(':')
+    const normalizedId = normalizeId(id)
+
+    if (!normalizedId) {
+      return []
+    }
+
+    if (type === 'ad') {
+      // Para un anuncio específico, solo devolver su ID
+      return [normalizedId]
+    }
+
+    if (type === 'adset') {
+      // Para un AdSet, obtener todos los ad_ids de sus anuncios
+      const result = findAdSetById(id) // Usar id sin normalizar para la búsqueda
+      if (result?.adSet) {
+        const adIds = result.adSet.ads
+          .map(ad => normalizeId(ad.adId))
+          .filter((id): id is string => id !== undefined)
+        return adIds
+      }
+    }
+
+    if (type === 'campaign') {
+      // Para una campaña, obtener TODOS los ad_ids de TODOS sus adsets
+      const campaign = findCampaignById(id) // Usar id sin normalizar para la búsqueda
+      if (campaign) {
+        const adIds = campaign.adSets.flatMap(adSet =>
+          adSet.ads.map(ad => normalizeId(ad.adId))
+        ).filter((id): id is string => id !== undefined)
+        return adIds
+      }
+    }
+    return []
+  }
+
+  // Convertir datos a estructura jerárquica para la tabla
+  const hierarchicalData = useMemo(() => {
+    return filteredCampaigns.map(campaign => {
+      const campaignId = normalizeId(campaign.campaignId) ?? ''
+
+      return {
+        data: {
+          id: `campaign:${campaignId}`,
+          name: campaign.campaignName,
+          status: campaign.status,
+          spend: campaign.spend,
+          reach: campaign.reach,
+          clicks: campaign.clicks,
+          cpc: campaign.cpc,
+          visitors: campaign.visitors,
+          cpv: campaign.cpv,
+          leads: campaign.leads,
+          cpl: campaign.cpl,
+          appointments: campaign.appointments,
+          sales: campaign.sales,
+          cac: campaign.cac,
+          revenue: campaign.revenue,
+          roas: campaign.roas
+        },
+        children: campaign.adSets.map(adSet => {
+          const adSetId = normalizeId(adSet.adSetId) ?? ''
+
+          return {
+            data: {
+              id: `adset:${adSetId}`,
+              name: adSet.adSetName,
+              status: adSet.status,
+              spend: adSet.spend,
+              reach: adSet.reach,
+              clicks: adSet.clicks,
+              cpc: adSet.cpc,
+              visitors: adSet.visitors,
+              cpv: adSet.cpv,
+              leads: adSet.leads,
+              cpl: adSet.cpl,
+              appointments: adSet.appointments,
+              sales: adSet.sales,
+              cac: adSet.cac,
+              revenue: adSet.revenue,
+              roas: adSet.roas
+            },
+            children: adSet.ads.map(ad => {
+              const adId = normalizeId(ad.adId) ?? ''
+
+              return {
+                data: {
+                  id: `ad:${adId}`,
+                  name: ad.adName,
+                  status: ad.status,
+                  spend: ad.spend,
+                  reach: ad.reach,
+                  clicks: ad.clicks,
+                  cpc: ad.cpc,
+                  visitors: ad.visitors,
+                  cpv: ad.cpv,
+                  leads: ad.leads,
+                  cpl: ad.cpl,
+                  appointments: ad.appointments,
+                  sales: ad.sales,
+                  cac: ad.cac,
+                  revenue: ad.revenue,
+                  roas: ad.roas
+                }
+              }
+            })
+          }
+        })
+      }
+    })
+  }, [filteredCampaigns])
+
+  const getRowId = (row: any) => row.id
+
+
+  // Handler para mostrar visitantes (solo de Meta Ads)
+  const handleShowVisitorsWithData = async (row: any, campaignsData: any[]) => {
+    // USAR REF para obtener las campañas guardadas
+    let campaignsDataToUse = campaignsRef.current
+
+    // Fallback a filteredCampaigns si ref está vacío
+    if (!campaignsDataToUse || campaignsDataToUse.length === 0) {
+      campaignsDataToUse = filteredCampaigns
+    }
+
+    // Si aún no hay datos, intentar con campaigns del state
+    if (!campaignsDataToUse || campaignsDataToUse.length === 0) {
+      campaignsDataToUse = campaigns
+    }
+
+    // Buscar los ad_ids usando los datos
+    const adIds = getAdIdsByHierarchyFromData(row.id, campaignsDataToUse)
+    const name = row.name
+
+    if (adIds.length === 0) {
+      addToast('warning', 'Sin anuncios', 'No se encontraron anuncios en este nivel.')
+      return
+    }
+
+    // Extraer información del row
+    const [levelType, id] = row.id.split(':')
+
+    // Abrir modal y cargar visitantes
+    setVisitorsModal({
+      isOpen: true,
+      data: [],
+      loading: true,
+      name,
+      adIds,
+      selectedVisitorId: null,
+      searchQuery: ''
+    })
+
+    try {
+      // Usar el nuevo endpoint de visitantes por jerarquía
+      const params = new URLSearchParams({
+        start: dateToApiString(dateRange.start),
+        end: dateToApiString(dateRange.end)
+      })
+
+      // Agregar todos los ad_ids
+      adIds.forEach(id => params.append('adIds', id))
+
+      // Agregar información de jerarquía si es necesario
+      if (levelType === 'campaign') {
+        params.append('campaignId', id)
+      } else if (levelType === 'adset') {
+        params.append('adSetId', id)
+      }
+
+      const url = getApiUrl(`/campaigns/visitors?${params.toString()}`)
+      const response = await fetchWithAuth(url)
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch visitors')
+      }
+
+      const result = await response.json()
+      const visitorsData = Array.isArray(result?.data) ? result.data : []
+
+      // Seleccionar automáticamente el primer visitante si hay datos
+      const firstVisitorId = visitorsData.length > 0 ? visitorsData[0].visitorId : null
+
+      setVisitorsModal(prev => ({
+        ...prev,
+        data: visitorsData,
+        loading: false,
+        selectedVisitorId: firstVisitorId
+      }))
+    } catch (error) {
+      console.error('Error fetching visitors:', error)
+      setVisitorsModal(prev => ({
+        ...prev,
+        loading: false
+      }))
+      addToast('error', 'Error al cargar visitantes', 'No se pudieron cargar los datos de los visitantes')
+    }
+  }
+
+  // Handler para mostrar detalles de contactos (leads, appointments, sales)
+  const handleShowContactDetails = async (row: any, type: 'leads' | 'appointments' | 'sales', expectedCount: number) => {
+    // Usar REF para obtener las campañas
+    let campaignsDataToUse = campaignsRef.current
+
+    // Fallback a filteredCampaigns si ref está vacío
+    if (!campaignsDataToUse || campaignsDataToUse.length === 0) {
+      campaignsDataToUse = filteredCampaigns
+    }
+
+    // Si aún no hay datos, intentar con campaigns del state
+    if (!campaignsDataToUse || campaignsDataToUse.length === 0) {
+      campaignsDataToUse = campaigns
+    }
+
+    // Buscar los ad_ids usando los datos
+    const adIds = getAdIdsByHierarchyFromData(row.id, campaignsDataToUse)
+    const name = row.name
+
+    if (adIds.length === 0) {
+      addToast('warning', 'Sin anuncios', 'No se encontraron anuncios en este nivel.')
+      return
+    }
+
+    // Extraer información del nivel (campaign, adset, ad)
+    const [levelType, levelId] = row.id.split(':')
+
+    // Abrir modal con loading state
+    setContactsModal({
+      isOpen: true,
+      data: [],
+      loading: true,
+      title: `${type === 'leads' ? 'Leads' : type === 'appointments' ? 'Citas' : 'Ventas'}`,
+      subtitle: name,
+      type
+    })
+
+    try {
+      // Usar dateToApiString para mantener consistencia con Reports
+      const startStr = dateToApiString(dateRange.start);
+      const endStr = dateToApiString(dateRange.end);
+
+      const params = new URLSearchParams({
+        start: startStr,
+        end: endStr,
+        type
+      })
+
+      // Agregar todos los ad_ids
+      adIds.forEach(id => params.append('adIds', id))
+
+      // Agregar información del nivel para filtrado correcto
+      if (levelType === 'campaign') {
+        params.append('campaignId', levelId)
+      } else if (levelType === 'adset') {
+        params.append('adSetId', levelId)
+      }
+
+      const url = getApiUrl(`/campaigns/contact-details?${params.toString()}`)
+      const response = await fetchWithAuth(url)
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch contacts')
+      }
+
+      const result = await response.json()
+      const contactsData = Array.isArray(result?.data) ? result.data : []
+
+      // Mapear los datos al formato del modal
+      const formattedContacts = contactsData.map((contact: any) => ({
+        id: contact.contact_id || contact.id,
+        name: contact.name || contact.contact_name,
+        email: contact.email,
+        phone: contact.phone,
+        createdAt: contact.event_date || contact.created_at || contact.createdAt,
+        status: contact.status,
+        // Para ventas, usar ltv como valor total del cliente
+        value: type === 'sales' ? (contact.ltv || contact.value || 0) : (contact.value || contact.revenue),
+        type: type,
+        ltv: contact.ltv || 0, // Agregar LTV directamente
+        appointments: contact.appointments || 0,
+        payments: contact.payments || 0,
+        metadata: {
+          source: contact.source,
+          campaign: contact.campaign_name,
+          adSet: contact.adset_name,
+          ad: contact.ad_name,
+          eventDate: contact.event_date
+        }
+      }))
+
+
+      // Actualizar modal con los datos
+      setContactsModal({
+        isOpen: true,
+        data: formattedContacts,
+        loading: false,
+        title: `${type === 'leads' ? 'Leads' : type === 'appointments' ? 'Citas' : 'Ventas'}`,
+        subtitle: `${name} (${formattedContacts.length} contactos)`,
+        type
+      })
+    } catch (error) {
+      console.error('Error al cargar contactos:', error)
+      setContactsModal(prev => ({
+        ...prev,
+        loading: false
+      }))
+      addToast('error', 'Error al cargar contactos', 'No se pudieron cargar los detalles de contactos')
+    }
   }
 
   return (
@@ -770,6 +1044,8 @@ export function Campaigns() {
             </Button>
           </div>
           <DateRangePicker />
+
+
           {syncRunning && (
             <div className="mt-2 p-3 rounded-lg glass text-secondary text-sm">
               <div className="flex items-center gap-2">
@@ -781,11 +1057,12 @@ export function Campaigns() {
           )}
         </div>
 
+
         {/* KPIs */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <KPICard
             title="Ingresos"
-            value={formatCurrency(campaignMetrics?.revenue || totals.revenue)}
+            value={formatCurrency(campaignMetrics?.revenue ?? totals.revenue)}
             change={campaignMetrics?.trends?.revenue || 0}
             trend={
               campaignMetrics?.trends?.revenue > 0 ? 'up' :
@@ -797,7 +1074,7 @@ export function Campaigns() {
           />
           <KPICard
             title="Inversión Total"
-            value={formatCurrency(campaignMetrics?.spend || totals.spend)}
+            value={formatCurrency(campaignMetrics?.spend ?? totals.spend)}
             change={campaignMetrics?.trends?.spend || 0}
             trend={
               campaignMetrics?.trends?.spend < 0 ? 'up' :
@@ -809,7 +1086,7 @@ export function Campaigns() {
           />
           <KPICard
             title="ROAS Promedio"
-            value={`${(campaignMetrics?.roas || avgMetrics.roas).toFixed(2)}x`}
+            value={`${((campaignMetrics?.roas ?? avgMetrics.roas)).toFixed(2)}x`}
             change={campaignMetrics?.trends?.roas || 0}
             trend={
               campaignMetrics?.trends?.roas > 0 ? 'up' :
@@ -821,7 +1098,7 @@ export function Campaigns() {
           />
           <KPICard
             title="Ventas"
-            value={formatNumber(campaignMetrics?.sales || totals.sales)}
+            value={formatNumber(campaignMetrics?.sales ?? totals.sales)}
             change={campaignMetrics?.trends?.sales || 0}
             trend={
               campaignMetrics?.trends?.sales > 0 ? 'up' :
@@ -833,25 +1110,13 @@ export function Campaigns() {
           />
           <KPICard
             title="Leads"
-            value={formatNumber(campaignMetrics?.leads || totals.leads)}
+            value={formatNumber(campaignMetrics?.leads ?? totals.leads)}
             change={campaignMetrics?.trends?.leads || 0}
             trend={
               campaignMetrics?.trends?.leads > 0 ? 'up' :
               campaignMetrics?.trends?.leads < 0 ? 'down' : 'up'
             }
             icon={Icons.users}
-            iconColor="text-primary"
-            className={metricsLoading ? 'animate-pulse' : ''}
-          />
-          <KPICard
-            title="Clicks"
-            value={formatNumber(campaignMetrics?.clicks || totals.clicks)}
-            change={campaignMetrics?.trends?.clicks || 0}
-            trend={
-              campaignMetrics?.trends?.clicks > 0 ? 'up' :
-              campaignMetrics?.trends?.clicks < 0 ? 'down' : 'up'
-            }
-            icon={Icons.mousePointer}
             iconColor="text-primary"
             className={metricsLoading ? 'animate-pulse' : ''}
           />
@@ -902,7 +1167,11 @@ export function Campaigns() {
                 <YAxis
                   tick={{ fill: themeData.colors.text.tertiary, fontSize: 12 }}
                   axisLine={{ stroke: themeData.colors.text.tertiary, opacity: 0.2 }}
-                  tickFormatter={(value) => `${value / 1000}k`}
+                  tickFormatter={(value) => {
+                    if (value >= 1000000) return `${(value / 1000000).toFixed(0)}M`
+                    if (value >= 1000) return `${(value / 1000).toFixed(0)}k`
+                    return value.toFixed(0)
+                  }}
                   domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1)]}
                 />
                 <SmartRechartsTooltip
@@ -964,8 +1233,8 @@ export function Campaigns() {
                   strokeWidth={2}
                   fill="url(#gradient-spend)"
                   dot={false}
-                  activeDot={{ 
-                    r: 5, 
+                  activeDot={{
+                    r: 5,
                     fill: themeData.colors.status.error,
                     stroke: theme === 'dark' ? '#0a0b0d' : '#ffffff',
                     strokeWidth: 2
@@ -978,8 +1247,8 @@ export function Campaigns() {
                   strokeWidth={2}
                   fill="url(#gradient-revenue)"
                   dot={false}
-                  activeDot={{ 
-                    r: 5, 
+                  activeDot={{
+                    r: 5,
                     fill: themeData.colors.status.success,
                     stroke: theme === 'dark' ? '#0a0b0d' : '#ffffff',
                     strokeWidth: 2
@@ -1103,7 +1372,7 @@ export function Campaigns() {
                   <select className="w-full mt-1 glass text-primary rounded-lg p-2 border border-primary" value={selectedAdAccount} onChange={(e) => handleAdAccountChange(e.target.value)}>
                     <option value="">Selecciona una cuenta</option>
                     {adAccounts.map((a) => (
-                      <option key={a.id} value={a.account_id || a.id}>{a.name} (act_{a.account_id || a.id})</option>
+                      <option key={a.id} value={a.account_id || a.id}>{a.name} ({a.account_id || a.id})</option>
                     ))}
                   </select>
                 </div>
@@ -1124,7 +1393,7 @@ export function Campaigns() {
                         value={sinceDate}
                         onChange={setSinceDate}
                         minDate={minSinceDate}
-                        maxDate={new Date().toISOString().slice(0,10)}
+                        maxDate={dateToApiString(createDateInTimezone())}
                         placeholder="Seleccionar fecha inicial"
                       />
                     </div>
@@ -1175,296 +1444,429 @@ export function Campaigns() {
         </div>
       )}
       
-      {/* Detail Modal */}
+
+      {/* Visitors Modal - Rediseñado como ContactDetailsModal */}
       <Modal
-        isOpen={detailModal.isOpen}
-        onClose={() => {
-          setDetailModal(prev => ({ ...prev, isOpen: false }))
-          setSelectedContact(null)
-          setShowPayments(false)
-        }}
-        title={`Contactos - ${detailModal.type === 'leads' ? 'Leads' : detailModal.type === 'appointments' ? 'Citas' : 'Ventas'}`}
+        isOpen={visitorsModal.isOpen}
+        onClose={() => setVisitorsModal(prev => ({ ...prev, isOpen: false }))}
+        title=""
         size="xl"
+        showCloseButton={false}
       >
-        <div className="-m-6">
-          {/* Header */}
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-            <div className="flex items-center justify-between">
+        <div className="-m-6 h-[600px] flex flex-col">
+          {/* Header simple sin efectos */}
+          <div className="px-6 py-4 border-b border-primary">
+            <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs text-tertiary">
-                  {detailModal.level === 'campaign' ? 'Campaña' : 
-                   detailModal.level === 'adset' ? 'Conjunto de anuncios' : 'Anuncio'}
-                </p>
-                <p className="text-base font-medium text-primary">{detailModal.name}</p>
+                <h3 className="text-lg font-semibold text-primary">Visitantes Web</h3>
+                <p className="text-sm text-secondary mt-1">{visitorsModal.name}</p>
               </div>
-              <div className="text-right">
-                <p className="text-xs text-tertiary">Total</p>
-                <p className="text-xl font-bold text-primary">
-                  {detailModal.data && formatNumber(detailModal.data[detailModal.type || 'leads'])}
-                </p>
-              </div>
+              <button
+                onClick={() => setVisitorsModal(prev => ({ ...prev, isOpen: false }))}
+                className="w-8 h-8 rounded-lg glass flex items-center justify-center"
+              >
+                <Icons.x className="w-4 h-4 text-tertiary" />
+              </button>
+            </div>
+
+            {/* Stats simples */}
+            <div className="flex items-center gap-4 mt-3">
+              <span className="text-sm text-secondary">
+                {visitorsModal.data.length} visitantes únicos
+              </span>
+              <span className="text-sm font-medium text-info">
+                {visitorsModal.data.filter(v => v.hasContact).length} identificados
+              </span>
+              <span className="text-sm font-medium text-success">
+                {visitorsModal.data.filter(v => v.contact?.ltv > 0).length} compraron
+              </span>
             </div>
           </div>
-          
-          {/* Two column layout */}
-          <div className="flex h-[500px]">
-            {(() => {
-              // UN SOLO FILTRO para ambos lugares
-              const adIds = getAdIdsForDetailContext()
-              const filteredContacts = contacts.filter(contact => {
-                // Primero validar que tenga attribution_ad_id
-                if (!contact.attributionAdId) return false
-                
-                // Validar por pertenencia del ad_id al contexto seleccionado
-                if (adIds.size === 0) return false
-                if (!adIds.has(contact.attributionAdId)) return false
-                
-                // IMPORTANTE: Aplicar los mismos filtros que el backend para consistencia
-                // El backend filtra por fecha de creación del contacto dentro del rango
-                const contactCreatedDate = new Date(contact.createdAt)
-                const isInDateRange = contactCreatedDate >= dateRange.start && contactCreatedDate <= dateRange.end
-                
-                // Solo mostrar contactos creados en el rango de fechas seleccionado
-                if (!isInDateRange) return false
-                
-                // Validar según el tipo de modal - eventos independientes
-                if (detailModal.type === 'leads') {
-                  // Un contacto es lead si existe (todo contacto inicia como lead)
-                  return true
-                }
-                if (detailModal.type === 'appointments') {
-                  // Un contacto tiene cita si appointments > 0
-                  return contact.appointments > 0
-                }
-                if (detailModal.type === 'sales') {
-                  // Un contacto tiene venta si payments > 0 (solo cuenta completados)
-                  return contact.payments > 0
-                }
-                
-                return false
-              })
-              
-              return (
-                <>
-                  {/* Left side - Contact list */}
-                  <div className="w-2/5 border-r border-gray-200 dark:border-gray-800 overflow-y-auto">
-                    <div className="p-3 border-b border-gray-200 dark:border-gray-800">
-                      <p className="text-xs text-tertiary">
-                        {filteredContacts.length} contactos
-                      </p>
-                    </div>
-                    
-                    <div className="divide-y divide-gray-200 dark:divide-gray-800">
-                      {filteredContacts.length === 0 ? (
-                        <div className="p-8 text-center">
-                          <Icons.users className="w-10 h-10 text-tertiary mx-auto mb-2" />
-                          <p className="text-xs text-tertiary">Sin contactos</p>
-                        </div>
-                      ) : (
-                        filteredContacts.map((contact) => (
-                    <div 
-                      key={contact.id}
-                      onClick={() => setSelectedContact(contact)}
-                      className={cn(
-                        "p-3 cursor-pointer hover:bg-primary/5 transition-colors",
-                        selectedContact?.id === contact.id && "bg-primary/10"
-                      )}
+
+          {/* Contenido principal con mejor distribución */}
+          <div className="flex flex-1 overflow-hidden">
+            {/* Panel izquierdo - Lista de visitantes */}
+            <div className="flex flex-col w-[380px] border-r border-primary">
+              {/* Barra de búsqueda */}
+              <div className="p-4 border-b border-primary">
+                <div className="relative">
+                  <Icons.search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tertiary" />
+                  <input
+                    type="text"
+                    placeholder="Buscar visitante..."
+                    value={visitorsModal.searchQuery}
+                    onChange={(e) => setVisitorsModal(prev => ({ ...prev, searchQuery: e.target.value }))}
+                    className="w-full pl-10 pr-3 py-2 glass border border-primary rounded-lg text-sm text-primary placeholder-tertiary focus:outline-none focus-ring"
+                  />
+                  {visitorsModal.searchQuery && (
+                    <button
+                      onClick={() => setVisitorsModal(prev => ({ ...prev, searchQuery: '' }))}
+                      className="absolute right-3 top-1/2 -translate-y-1/2"
                     >
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-full bg-gray-800 dark:bg-white flex items-center justify-center flex-shrink-0">
-                          <span className="text-xs font-medium text-white dark:text-gray-900">
-                            {contact.name?.charAt(0).toUpperCase() || 'C'}
-                          </span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-primary truncate">
-                            {contact.name || 'Sin nombre'}
-                          </p>
-                          <p className="text-xs text-tertiary truncate">{contact.email}</p>
-                        </div>
-                        {detailModal.type === 'sales' && contact.ltv > 0 && (
-                          <span className="text-xs font-medium text-success">
-                            {formatCurrency(contact.ltv)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-            
-            {/* Right side - Contact details */}
-            <div className="flex-1 overflow-y-auto">
-              {selectedContact ? (
-                <div className="p-6 space-y-4">
-                  {/* Contact header */}
-                  <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-full bg-gray-800 dark:bg-white flex items-center justify-center">
-                      <span className="text-lg font-medium text-white dark:text-gray-900">
-                        {selectedContact.name?.charAt(0).toUpperCase() || 'C'}
-                      </span>
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="text-lg font-medium text-primary">
-                        {selectedContact.name || 'Sin nombre'}
-                      </h3>
-                      <p className="text-sm text-secondary">{selectedContact.email}</p>
-                    </div>
-                  </div>
-                  
-                  {/* Contact info */}
-                  <div className="space-y-3">
-                    <div className="glass rounded-lg p-4 space-y-3">
-                      <h4 className="text-xs text-tertiary uppercase tracking-wider">Información de contacto</h4>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <p className="text-xs text-tertiary">Teléfono</p>
-                          <p className="text-sm text-primary">{selectedContact.phone || 'No registrado'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-tertiary">Empresa</p>
-                          <p className="text-sm text-primary">{selectedContact.company || 'No especificada'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-tertiary">Fecha de registro</p>
-                          <p className="text-sm text-primary">
-                            {new Date(selectedContact.createdAt).toLocaleDateString('es-ES', { 
-                              day: '2-digit', 
-                              month: 'long',
-                              year: 'numeric'
-                            })}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-tertiary">Estado</p>
-                          <Badge variant={
-                            selectedContact.status === 'client' ? 'success' : 
-                            selectedContact.status === 'appointment' ? 'info' : 'default'
-                          }>
-                            {selectedContact.status === 'client' ? 'Cliente' : 
-                             selectedContact.status === 'appointment' ? 'Cita agendada' : 'Lead'}
-                          </Badge>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Journey info */}
-                    <div className="glass rounded-lg p-4 space-y-3">
-                      <h4 className="text-xs text-tertiary uppercase tracking-wider">Viaje del cliente</h4>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-secondary">Fuente</span>
-                          <span className="text-sm text-primary">{selectedContact.source || 'Meta Ads'}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-secondary">Campaña atribuida</span>
-                          <span className="text-sm text-primary">{detailModal.name}</span>
-                        </div>
-                        {selectedContact.attributionAdId && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-secondary">ID del anuncio</span>
-                            <span className="text-sm text-primary font-mono text-xs">
-                              {selectedContact.attributionAdId}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Metrics */}
-                    {(selectedContact.appointments > 0 || selectedContact.payments > 0) && (
-                      <div className="glass rounded-lg p-4 space-y-3">
-                        <h4 className="text-xs text-tertiary uppercase tracking-wider">Métricas</h4>
-                        <div className="grid grid-cols-2 gap-3">
-                          {selectedContact.appointments > 0 && (
-                            <div>
-                              <p className="text-xs text-tertiary">Citas agendadas</p>
-                              <p className="text-lg font-medium text-info">{selectedContact.appointments}</p>
-                            </div>
-                          )}
-                          {selectedContact.payments > 0 && (
-                            <>
-                              <div>
-                                <p className="text-xs text-tertiary">Total de compras</p>
-                                <p className="text-lg font-medium text-success">{selectedContact.payments}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-tertiary">Valor de por vida (LTV)</p>
-                                <p className="text-lg font-medium text-success">{formatCurrency(selectedContact.ltv)}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-tertiary">Ticket promedio</p>
-                                <p className="text-lg font-medium text-primary">
-                                  {formatCurrency(selectedContact.ltv / selectedContact.payments)}
-                                </p>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Payments history (collapsible) */}
-                    {selectedContact.payments > 0 && (
-                      <div className="glass rounded-lg overflow-hidden">
-                        <button
-                          onClick={() => setShowPayments(!showPayments)}
-                          className="w-full p-4 flex items-center justify-between hover:bg-primary/5 transition-colors"
-                        >
-                          <h4 className="text-xs text-tertiary uppercase tracking-wider">
-                            Historial de pagos ({selectedContact.payments})
-                          </h4>
-                          <Icons.chevronDown className={cn(
-                            "w-4 h-4 text-tertiary transition-transform",
-                            showPayments && "rotate-180"
-                          )} />
-                        </button>
-                        {showPayments && (
-                          <div className="border-t border-gray-200 dark:border-gray-800 p-4 space-y-2 max-h-48 overflow-y-auto">
-                            {/* Simulación de pagos */}
-                            {Array.from({ length: Math.min(selectedContact.payments, 5) }).map((_, idx) => (
-                              <div key={idx} className="flex items-center justify-between py-2 border-b border-gray-200 dark:border-gray-800 last:border-0">
-                                <div>
-                                  <p className="text-sm text-primary">Pago #{idx + 1}</p>
-                                  <p className="text-xs text-tertiary">
-                                    {new Date(Date.now() - idx * 7 * 24 * 60 * 60 * 1000).toLocaleDateString('es-ES')}
-                                  </p>
-                                </div>
-                                <span className="text-sm font-medium text-success">
-                                  {formatCurrency(selectedContact.ltv / selectedContact.payments)}
-                                </span>
-                              </div>
-                            ))}
-                            {selectedContact.payments > 5 && (
-                              <p className="text-xs text-tertiary text-center pt-2">
-                                +{selectedContact.payments - 5} pagos más
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                      <Icons.x className="w-4 h-4 text-tertiary" />
+                    </button>
+                  )}
                 </div>
-              ) : (
-                <div className="h-full flex items-center justify-center">
-                  <div className="text-center">
-                    <Icons.user className="w-12 h-12 text-tertiary mx-auto mb-3" />
-                    <p className="text-sm text-tertiary">
-                      Selecciona un contacto para ver sus detalles
-                    </p>
+              </div>
+
+              {/* Lista de visitantes filtrada */}
+              <div className="flex-1 overflow-y-auto scrollbar-thin">
+                {visitorsModal.loading ? (
+                  <div className="flex flex-col items-center justify-center h-full p-8">
+                    <div className="w-12 h-12 rounded-xl glass-morphism flex items-center justify-center mb-3">
+                      <Icons.refresh className="w-6 h-6 text-primary animate-spin" />
+                    </div>
+                    <p className="text-sm text-secondary">Cargando visitantes...</p>
                   </div>
+                ) : visitorsModal.data.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full p-8">
+                    <div className="w-12 h-12 rounded-xl glass-morphism flex items-center justify-center mb-3">
+                      <Icons.users className="w-6 h-6 text-tertiary" />
+                    </div>
+                    <p className="text-sm text-secondary">No hay visitantes registrados</p>
+                    <p className="text-xs text-tertiary mt-1">Los visitantes aparecerán cuando lleguen desde los anuncios</p>
+                  </div>
+                ) : (
+                  <div>
+                    {(() => {
+                      // Filtrar visitantes según búsqueda
+                      const query = visitorsModal.searchQuery.toLowerCase()
+                      const filteredVisitors = query ?
+                        visitorsModal.data.filter(v =>
+                          v.visitorId?.toLowerCase().includes(query) ||
+                          v.contact?.name?.toLowerCase().includes(query) ||
+                          v.contact?.email?.toLowerCase().includes(query) ||
+                          v.contact?.phone?.toLowerCase().includes(query)
+                        ) : visitorsModal.data
+
+                      if (filteredVisitors.length === 0 && query) {
+                        return (
+                          <div className="flex flex-col items-center justify-center h-full p-8">
+                            <Icons.search className="w-8 h-8 text-tertiary mb-2" />
+                            <p className="text-sm text-secondary">No se encontraron visitantes</p>
+                            <button
+                              onClick={() => setVisitorsModal(prev => ({ ...prev, searchQuery: '' }))}
+                              className="mt-3 text-xs text-primary hover:underline"
+                            >
+                              Limpiar búsqueda
+                            </button>
+                          </div>
+                        )
+                      }
+
+                      return filteredVisitors.map((visitor) => (
+                        <div
+                          key={visitor.visitorId}
+                          onClick={() => setVisitorsModal(prev => ({
+                            ...prev,
+                            selectedVisitorId: visitor.visitorId
+                          }))}
+                          className={cn(
+                            "p-3 cursor-pointer border-b border-primary hover:bg-primary/5",
+                            visitorsModal.selectedVisitorId === visitor.visitorId && "bg-primary/10"
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            {/* Avatar */}
+                            <div className={cn(
+                              "w-8 h-8 rounded-full flex items-center justify-center",
+                              visitor.hasContact ? "glass" : "border border-primary"
+                            )}>
+                              <Icons.user className={cn(
+                                "w-4 h-4",
+                                visitor.hasContact ? "text-info" : "text-tertiary"
+                              )} />
+                            </div>
+
+                            {/* Info del visitante */}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-primary truncate">
+                                {visitor.contact?.name || `Visitante ${visitor.visitorId.substring(0, 8)}`}
+                              </p>
+                              <p className="text-xs text-secondary truncate">
+                                {visitor.hasContact && visitor.contact?.name ?
+                                  `ID: ${visitor.visitorId.substring(0, 8)}...` :
+                                  'Visitante anónimo'}
+                              </p>
+                            </div>
+
+                            {/* Indicadores */}
+                            <div className="flex flex-col items-end gap-1">
+                              {visitor.contact?.ltv > 0 && (
+                                <span className="text-xs font-semibold text-success">
+                                  {formatCurrency(visitor.contact.ltv)}
+                                </span>
+                              )}
+                              {visitor.hasContact && (
+                                <Badge variant="info" size="sm">
+                                  Identificado
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer simple */}
+              {visitorsModal.data.length > 0 && (
+                <div className="p-3 border-t border-primary">
+                  <span className="text-xs text-tertiary">
+                    {(() => {
+                      const query = visitorsModal.searchQuery.toLowerCase()
+                      const filtered = query ?
+                        visitorsModal.data.filter(v =>
+                          v.visitorId?.toLowerCase().includes(query) ||
+                          v.contact?.name?.toLowerCase().includes(query) ||
+                          v.contact?.email?.toLowerCase().includes(query) ||
+                          v.contact?.phone?.toLowerCase().includes(query)
+                        ) : visitorsModal.data
+
+                      if (query && filtered.length !== visitorsModal.data.length) {
+                        return `Mostrando ${filtered.length} de ${visitorsModal.data.length} visitantes`
+                      }
+                      return `Total: ${visitorsModal.data.length} visitantes`
+                    })()}
+                  </span>
                 </div>
               )}
             </div>
+
+            {/* Panel derecho - Detalles del visitante seleccionado */}
+            <div className="flex flex-col flex-1 bg-secondary">
+              {visitorsModal.data.length > 0 && visitorsModal.selectedVisitorId && (
+                <>
+                  {/* Buscar el visitante seleccionado */}
+                  {(() => {
+                    const selectedVisitor = visitorsModal.data.find(
+                      v => v.visitorId === visitorsModal.selectedVisitorId
+                    ) || visitorsModal.data[0]
+
+                    return (
+                      <>
+                        {/* Header del detalle */}
+                        <div className="p-4 border-b border-primary">
+                          <div className="flex items-start gap-3">
+                            <div className={cn(
+                              "w-10 h-10 rounded-full flex items-center justify-center",
+                              selectedVisitor.hasContact ? "glass" : "border border-primary"
+                            )}>
+                              <Icons.user className={cn(
+                                "w-5 h-5",
+                                selectedVisitor.hasContact ? "text-info" : "text-tertiary"
+                              )} />
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="text-lg font-semibold text-primary">
+                                {selectedVisitor.contact?.name || 'Visitante anónimo'}
+                              </h4>
+                              <p className="text-sm text-secondary mt-0.5">
+                                ID: {selectedVisitor.visitorId}
+                              </p>
+                              {selectedVisitor.hasContact && selectedVisitor.contact && (
+                                <>
+                                  {selectedVisitor.contact.email && (
+                                    <p className="text-sm text-secondary">
+                                      {selectedVisitor.contact.email}
+                                    </p>
+                                  )}
+                                  {selectedVisitor.contact.phone && (
+                                    <p className="text-sm text-secondary">
+                                      {selectedVisitor.contact.phone}
+                                    </p>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Contenido del detalle */}
+                        <div className="flex-1 overflow-y-auto p-4">
+                          <div className="space-y-4">
+                            {/* Información de la sesión */}
+                            <div>
+                              <h5 className="text-xs font-medium text-tertiary uppercase tracking-wider mb-3">
+                                Información de Sesión
+                              </h5>
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <Icons.calendar className="w-4 h-4 text-tertiary" />
+                                  <span className="text-sm text-secondary">
+                                    Primera visita: {formatDateLong(selectedVisitor.firstVisit)}
+                                  </span>
+                                </div>
+                                {selectedVisitor.lastVisit && (
+                                  <div className="flex items-center gap-2">
+                                    <Icons.clock className="w-4 h-4 text-tertiary" />
+                                    <span className="text-sm text-secondary">
+                                      Última visita: {formatDateShort(selectedVisitor.lastVisit)}
+                                    </span>
+                                  </div>
+                                )}
+                                {selectedVisitor.sources && (
+                                  <div className="flex items-center gap-2">
+                                    <Icons.target className="w-4 h-4 text-tertiary" />
+                                    <span className="text-sm text-secondary">
+                                      Fuente: {selectedVisitor.sources}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Dispositivo y ubicación */}
+                            <div>
+                              <h5 className="text-xs font-medium text-tertiary uppercase tracking-wider mb-3">
+                                Dispositivo y Ubicación
+                              </h5>
+                              <div className="grid grid-cols-2 gap-3">
+                                {selectedVisitor.location && (
+                                  <div className="glass rounded-lg p-3">
+                                    <p className="text-xs text-tertiary mb-1">Ubicación</p>
+                                    <p className="text-sm font-medium text-primary">
+                                      {selectedVisitor.location.city && `${selectedVisitor.location.city}, `}
+                                      {selectedVisitor.location.country}
+                                    </p>
+                                  </div>
+                                )}
+                                {selectedVisitor.device && (
+                                  <div className="glass rounded-lg p-3">
+                                    <p className="text-xs text-tertiary mb-1">Dispositivo</p>
+                                    <p className="text-sm font-medium text-primary capitalize">
+                                      {selectedVisitor.device.type}
+                                    </p>
+                                    {selectedVisitor.device.browser && (
+                                      <p className="text-xs text-secondary capitalize">
+                                        {selectedVisitor.device.browser}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Métricas de actividad */}
+                            <div>
+                              <h5 className="text-xs font-medium text-tertiary uppercase tracking-wider mb-3">
+                                Actividad
+                              </h5>
+                              <div className="grid grid-cols-3 gap-3">
+                                <div className="glass rounded-lg p-3">
+                                  <p className="text-xs text-tertiary mb-1">Sesiones</p>
+                                  <p className="text-lg font-semibold text-primary">
+                                    {selectedVisitor.sessionCount || 1}
+                                  </p>
+                                </div>
+                                <div className="glass rounded-lg p-3">
+                                  <p className="text-xs text-tertiary mb-1">Páginas vistas</p>
+                                  <p className="text-lg font-semibold text-primary">
+                                    {selectedVisitor.totalPageviews || 1}
+                                  </p>
+                                </div>
+                                <div className="glass rounded-lg p-3">
+                                  <p className="text-xs text-tertiary mb-1">Tiempo total</p>
+                                  <p className="text-lg font-semibold text-primary">
+                                    {selectedVisitor.totalTime || '0m'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Información del contacto si está identificado */}
+                            {selectedVisitor.hasContact && selectedVisitor.contact && (
+                              <div>
+                                <h5 className="text-xs font-medium text-tertiary uppercase tracking-wider mb-3">
+                                  Información del Contacto
+                                </h5>
+                                <div className="glass rounded-lg p-4">
+                                  <div className="space-y-2">
+                                    {selectedVisitor.contact.email && (
+                                      <div className="flex items-center gap-2">
+                                        <Icons.send className="w-4 h-4 text-tertiary" />
+                                        <span className="text-sm text-secondary">{selectedVisitor.contact.email}</span>
+                                      </div>
+                                    )}
+                                    {selectedVisitor.contact.phone && (
+                                      <div className="flex items-center gap-2">
+                                        <Icons.phone className="w-4 h-4 text-tertiary" />
+                                        <span className="text-sm text-secondary">{selectedVisitor.contact.phone}</span>
+                                      </div>
+                                    )}
+                                    {selectedVisitor.contact.ltv > 0 && (
+                                      <div className="flex items-center gap-2 pt-2 border-t border-primary">
+                                        <Icons.dollarSign className="w-4 h-4 text-success" />
+                                        <span className="text-sm text-secondary">Valor de vida:</span>
+                                        <span className="text-sm font-medium text-success">
+                                          {formatCurrency(selectedVisitor.contact.ltv)}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {selectedVisitor.contact.appointments > 0 && (
+                                      <div className="flex items-center gap-2">
+                                        <Icons.calendar className="w-4 h-4 text-info" />
+                                        <span className="text-sm text-secondary">
+                                          {selectedVisitor.contact.appointments} citas agendadas
+                                        </span>
+                                      </div>
+                                    )}
+                                    {selectedVisitor.contact.payments > 0 && (
+                                      <div className="flex items-center gap-2">
+                                        <Icons.shoppingCart className="w-4 h-4 text-success" />
+                                        <span className="text-sm text-secondary">
+                                          {selectedVisitor.contact.payments} compras realizadas
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Páginas visitadas si hay datos */}
+                            {selectedVisitor.pageviews && selectedVisitor.pageviews.length > 0 && (
+                              <div>
+                                <h5 className="text-xs font-medium text-tertiary uppercase tracking-wider mb-3">
+                                  Páginas Visitadas
+                                </h5>
+                                <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-thin">
+                                  {selectedVisitor.pageviews.map((page: any, idx: number) => (
+                                    <div key={idx} className="p-2 rounded-lg glass-hover">
+                                      <p className="text-xs text-tertiary">
+                                        {formatDateShort(page.timestamp)}
+                                      </p>
+                                      <p className="text-sm text-primary">{page.url}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </>
-              )
-            })()}
+              )}
+            </div>
           </div>
         </div>
       </Modal>
-      
+
+      {/* Contacts Details Modal */}
+      <ContactDetailsModal
+        isOpen={contactsModal.isOpen}
+        onClose={() => setContactsModal(prev => ({ ...prev, isOpen: false }))}
+        data={contactsModal.data}
+        loading={contactsModal.loading}
+        title={contactsModal.title}
+        subtitle={contactsModal.subtitle}
+        type={contactsModal.type}
+      />
+
       {/* Toast notifications */}
       <ToastManager toasts={toasts} onRemove={removeToast} />
     </PageContainer>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { getApiUrl } from '../config/api'
 
 interface DeploymentContextType {
@@ -63,9 +63,6 @@ export function DeploymentProvider({ children }: { children: React.ReactNode }) 
         } finally {
           es.close()
           setIsDeploying(false)
-          setTimeout(() => {
-            if (deployStatus === 'success') setShowToast(false)
-          }, 5000)
         }
       })
 
@@ -82,7 +79,17 @@ export function DeploymentProvider({ children }: { children: React.ReactNode }) 
       setDeployLogs((prev) => [...prev, String(error)])
       setIsDeploying(false)
     }
-  }, [isDeploying, deployStatus])
+  }, [isDeploying])
+
+  useEffect(() => {
+    if (deployStatus !== 'success') return
+
+    const timer = setTimeout(() => {
+      setShowToast(false)
+    }, 5000)
+
+    return () => clearTimeout(timer)
+  }, [deployStatus])
 
   return (
     <DeploymentContext.Provider value={{

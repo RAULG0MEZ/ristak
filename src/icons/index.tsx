@@ -25,6 +25,7 @@ import {
   Check,
   AlertCircle,
   Info,
+  Inbox,
   Home,
   Plus,
   Minus,
@@ -71,7 +72,8 @@ import {
   Building,
   Receipt,
   AlertTriangle,
-  Lock
+  Lock,
+  Compass
 } from 'lucide-react'
 import { Meta } from '@lobehub/icons'
 import { useEffect, useState } from 'react'
@@ -201,6 +203,10 @@ export const Icons = {
   phone: Phone,
   building: Building,
   receipt: Receipt,
+  info: Info,
+  inbox: Inbox,
+  creditCard: CreditCard,
+  compass: Compass,
 }
 
 export type IconName = keyof typeof Icons

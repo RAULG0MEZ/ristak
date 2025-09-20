@@ -1,7 +1,10 @@
+import { createDateInSpecificTimezone } from './dateUtils'
+
 export interface CSVColumn {
   key: string
   name: string
   required?: boolean
+  description?: string
 }
 
 export interface CSVMapping {
@@ -255,8 +258,32 @@ export function splitName(fullName: string): { firstName: string; lastName: stri
   return { firstName, lastName }
 }
 
-export function normalizeDate(dateValue: string): string | null {
+/**
+ * Normaliza una fecha con un timezone específico
+ * @param dateValue - Valor de fecha del CSV
+ * @param timezone - Timezone específico para esta importación
+ */
+export function normalizeDateWithTimezone(dateValue: string, timezone?: string): string | null {
   if (!dateValue) return null
+
+  // Si no se especifica timezone, usar el configurado por defecto
+  const importTimezone = timezone || 'America/Mexico_City'
+
+  return normalizeDate(dateValue, importTimezone)
+}
+
+/**
+ * Normaliza una fecha del CSV asumiendo que viene en el timezone configurado
+ * y la convierte a UTC para guardar en la DB
+ *
+ * IMPORTANTE: Las fechas del CSV se interpretan como si vinieran en el timezone
+ * configurado en la app, NO en el timezone del navegador
+ */
+export function normalizeDate(dateValue: string, timezone?: string): string | null {
+  if (!dateValue) return null
+
+  // Usar el timezone específico si se proporciona
+  const timezoneToUse = timezone || 'America/Mexico_City'
 
   // Utilidad para validar componentes y evitar overflow de Date
   const isValidYMD = (y: number, m1: number, d: number) => {
@@ -283,16 +310,16 @@ export function normalizeDate(dateValue: string): string | null {
       // Si el primer número es > 12, debe ser día (formato DD/MM/YYYY)
       if (first > 12) {
         if (isValidYMD(year, second, first)) {
-          const dt = new Date(year, second - 1, first)
-          dt.setHours(0, 0, 0, 0)
+          // Crear fecha en timezone específico y convertir a UTC
+          const dt = createDateInSpecificTimezone(year, second - 1, first, 0, 0, timezoneToUse)
           return dt.toISOString()
         }
       }
       // Si el segundo número es > 12, debe ser día (formato MM/DD/YYYY)
       else if (second > 12) {
         if (isValidYMD(year, first, second)) {
-          const dt = new Date(year, first - 1, second)
-          dt.setHours(0, 0, 0, 0)
+          // Crear fecha en timezone específico y convertir a UTC
+          const dt = createDateInSpecificTimezone(year, first - 1, second, 0, 0, timezoneToUse)
           return dt.toISOString()
         }
       }
@@ -300,14 +327,14 @@ export function normalizeDate(dateValue: string): string | null {
       else {
         // Primero intentamos DD/MM/YYYY
         if (isValidYMD(year, second, first)) {
-          const dt = new Date(year, second - 1, first)
-          dt.setHours(0, 0, 0, 0)
+          // Crear fecha en timezone específico y convertir a UTC
+          const dt = createDateInSpecificTimezone(year, second - 1, first, 0, 0, timezoneToUse)
           return dt.toISOString()
         }
         // Si no es válido, intentamos MM/DD/YYYY
         else if (isValidYMD(year, first, second)) {
-          const dt = new Date(year, first - 1, second)
-          dt.setHours(0, 0, 0, 0)
+          // Crear fecha en timezone específico y convertir a UTC
+          const dt = createDateInSpecificTimezone(year, first - 1, second, 0, 0, timezoneToUse)
           return dt.toISOString()
         }
       }
@@ -320,8 +347,8 @@ export function normalizeDate(dateValue: string): string | null {
       const month = parseInt(m[2], 10)
       const day = parseInt(m[3], 10)
       if (isValidYMD(year, month, day)) {
-        const dt = new Date(year, month - 1, day)
-        dt.setHours(0, 0, 0, 0)
+        // Crear fecha en timezone específico y convertir a UTC
+        const dt = createDateInSpecificTimezone(year, month - 1, day, 0, 0, timezoneToUse)
         return dt.toISOString()
       }
     }
@@ -334,8 +361,8 @@ export function normalizeDate(dateValue: string): string | null {
       const ys = parseInt(m[3], 10)
       const year = ys > 50 ? 1900 + ys : 2000 + ys
       if (isValidYMD(year, month, day)) {
-        const dt = new Date(year, month - 1, day)
-        dt.setHours(0, 0, 0, 0)
+        // Crear fecha en timezone específico y convertir a UTC
+        const dt = createDateInSpecificTimezone(year, month - 1, day, 0, 0, timezoneToUse)
         return dt.toISOString()
       }
     }
@@ -343,8 +370,20 @@ export function normalizeDate(dateValue: string): string | null {
     // Último recurso: Date.parse si trae algo tipo '2024-03-05T...' o nombres de mes
     const dt = new Date(cleaned)
     if (!isNaN(dt.getTime())) {
-      dt.setHours(0, 0, 0, 0)
-      return dt.toISOString()
+      // Si ya tiene hora, asumir que viene en timezone local y convertir a UTC
+      if (cleaned.includes('T') || cleaned.includes(':')) {
+        return dt.toISOString()
+      } else {
+        // Si no tiene hora, crear a medianoche en timezone configurado
+        const dtLocal = createDateInSpecificTimezone(
+          dt.getFullYear(),
+          dt.getMonth(),
+          dt.getDate(),
+          0, 0,
+          timezoneToUse
+        )
+        return dtLocal.toISOString()
+      }
     }
 
     return null
@@ -354,10 +393,11 @@ export function normalizeDate(dateValue: string): string | null {
 }
 
 export function processCSVRow(
-  row: string[], 
-  headers: string[], 
-  mapping: CSVMapping, 
-  importType: ImportType
+  row: string[],
+  headers: string[],
+  mapping: CSVMapping,
+  importType: ImportType,
+  timezone?: string
 ): Record<string, any> {
   const processedRow: Record<string, any> = {}
 
@@ -375,7 +415,7 @@ export function processCSVRow(
         case 'createdAt':
         case 'paymentDate':
         case 'appointmentDate':
-          processedRow[fieldKey] = normalizeDate(value)
+          processedRow[fieldKey] = normalizeDateWithTimezone(value, timezone)
           break
         case 'email':
           // Validar email; si es inválido o vacío, dejar en blanco

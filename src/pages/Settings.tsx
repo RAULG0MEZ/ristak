@@ -1,14 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { PageContainer, Card, Button, DatePicker, Modal } from '../ui'
 import { Icons } from '../icons'
 import { cn } from '../lib/utils'
+import { dateToApiString, subtractMonths } from '../lib/dateUtils'
 import { CSVImportModal } from '../modules/import/CSVImportModal'
 import type { ImportType } from '../lib/csvUtils'
 import { useImportJobs } from '../hooks/useImportJobs'
 import { ImportProgress } from '../ui/ImportProgress'
 import { useToastActions } from '../hooks/useToast'
-import { getApiUrl, getMetaRedirectUri } from '../config/api'
+import { getApiUrl, fetchWithAuth } from '../config/api'
 import { TrackingSection } from '../modules/tracking/TrackingSection'
+import { useSettings } from '../contexts/SettingsContext'
 
 interface WebhookEndpoint {
   name: string
@@ -28,10 +30,23 @@ export function Settings() {
   
   // Account IDs state
   const [accountConfig, setAccountConfig] = useState({
-    account_id: '',
-    subaccount_id: '',
-    webhook_base_url: 'https://send.hollytrack.com'
+    webhook_base_url: 'https://send.hollytrack.com',
+    webhook_endpoints: {
+      contacts: 'https://send.hollytrack.com/webhook/contacts',
+      appointments: 'https://send.hollytrack.com/webhook/appointments',
+      payments: 'https://send.hollytrack.com/webhook/payments',
+      refunds: 'https://send.hollytrack.com/webhook/refunds'
+    },
+    tracking: {
+      host: 'ilove.hollytrack.com',
+      snippet_url: 'https://ilove.hollytrack.com/snip.js',
+      snippet_code: '<script defer src="https://ilove.hollytrack.com/snip.js"></script>'
+    },
+    account: {
+      id: ''
+    }
   })
+  const [isAccountConfigLoading, setIsAccountConfigLoading] = useState(true)
 
   // Meta integration state
   const [metaConfig, setMetaConfig] = useState<null | {
@@ -57,66 +72,84 @@ export function Settings() {
   // Hook para jobs de importación
   const { jobs: importJobs, refreshJobs } = useImportJobs()
   const toast = useToastActions()
+  const { settings, updateSettings: persistSettings, loading: settingsLoading } = useSettings()
+
+  const buildAccountData = useCallback(() => ({
+    account_name: settings.account_name || '',
+    user_name: settings.user_name || '',
+    user_email: settings.user_email || '',
+    user_phone: settings.user_phone || '',
+    user_city: settings.user_city || '',
+    user_business_name: settings.user_business_name || '',
+    timezone: settings.timezone || 'America/Mexico_City',
+    currency: settings.currency || 'MXN',
+    user_zip_code: settings.user_zip_code || '',
+    user_tax: settings.user_tax || 'IVA',
+    user_tax_percentage: settings.user_tax_percentage ?? 16,
+    account_logo: settings.account_logo || '',
+    account_profile_picture: settings.account_profile_picture || ''
+  }), [settings])
   
   // Account configuration state
-  const [accountData, setAccountData] = useState({
-    subaccount_name: '',
-    user_name: '',
-    user_email: '',
-    user_phone: '',
-    user_city: '',
-    user_business_name: '',
-    timezone: 'America/Mexico_City',
-    currency: 'MXN',
-    user_zip_code: '',
-    user_tax: 'IVA',
-    user_tax_percentage: 16,
-    subaccount_logo: '',
-    subaccount_profile_picture: ''
-  })
+  const [accountData, setAccountData] = useState(buildAccountData)
   const [isEditingAccount, setIsEditingAccount] = useState(false)
   const [isSavingAccount, setIsSavingAccount] = useState(false)
 
   useEffect(() => {
+    let mounted = true; // Flag para evitar actualizaciones después de desmontar
+
     // Load account IDs configuration
-    fetch(getApiUrl('/config/account-config'))
+    fetchWithAuth(getApiUrl('/config/account-config'))
       .then(r => r.json())
       .then(res => {
-        if (res?.data) {
+        if (mounted && res?.data) {
           setAccountConfig(res.data)
         }
       })
       .catch(() => {})
-    
+      .finally(() => {
+        if (mounted) {
+          setIsAccountConfigLoading(false)
+        }
+      })
+
     // Load existing config to render selected values
-    fetch(getApiUrl('/meta/config')).then(r => r.json()).then(res => {
-      if (res?.data) setMetaConfig(res.data)
+    fetchWithAuth(getApiUrl('/meta/config')).then(r => r.json()).then(res => {
+      if (mounted && res?.data) setMetaConfig(res.data)
     }).catch(() => {})
+
     // Poll sync status
     const tick = () => {
-      fetch(getApiUrl('/meta/sync/status')).then(r => r.json()).then(res => setMetaStatus(res?.data || null)).catch(() => {})
+      if (mounted) {
+        fetchWithAuth(getApiUrl('/meta/sync/status'))
+          .then(r => r.json())
+          .then(res => {
+            if (mounted) setMetaStatus(res?.data || null)
+          })
+          .catch(() => {})
+      }
     }
     tick()
     const id = setInterval(tick, 5000)
-    
-    // Load account configuration
-    fetch(getApiUrl('/subaccount'))
-      .then(r => r.json())
-      .then(res => {
-        if (res?.data) {
-          setAccountData(res.data)
-        }
-      })
-      .catch(() => {})
-    
-    return () => clearInterval(id)
+
+    // Account configuration removed - endpoint doesn't exist
+    // setAccountData with default values if needed
+
+    return () => {
+      mounted = false; // Evitar actualizaciones de estado
+      clearInterval(id)
+    }
   }, [])
+
+  useEffect(() => {
+    if (!isEditingAccount) {
+      setAccountData(buildAccountData())
+    }
+  }, [buildAccountData, isEditingAccount])
 
   // Helper: min date (max 35 months back)
   const minSinceDate = useMemo(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 35)
-    return d.toISOString().slice(0,10)
+    return dateToApiString(subtractMonths(new Date(), 35))
   }, [])
 
   const handleMetaConfigureClick = () => {
@@ -129,7 +162,7 @@ export function Settings() {
         window.removeEventListener('message', onMsg)
         // Fetch ad accounts and open modal
         try {
-          const res = await fetch(getApiUrl('/meta/adaccounts'))
+          const res = await fetchWithAuth(getApiUrl('/meta/adaccounts'))
           
           if (!res.ok) {
             throw new Error(`Error al cargar cuentas de anuncios: ${res.status}`)
@@ -142,9 +175,7 @@ export function Settings() {
           setSelectedAdAccount('')
           setSelectedPixel('')
           // Set default date to 34 months ago
-          const defaultDate = new Date()
-          defaultDate.setMonth(defaultDate.getMonth() - 34)
-          setSinceDate(defaultDate.toISOString().slice(0, 10))
+          setSinceDate(dateToApiString(subtractMonths(new Date(), 34)))
           setSchedule('1h')
           setConfigError(null)
           
@@ -169,7 +200,7 @@ export function Settings() {
     }
     
     try {
-      const res = await fetch(getApiUrl(`/meta/pixels?ad_account_id=${encodeURIComponent(id)}`))
+      const res = await fetchWithAuth(getApiUrl(`/meta/pixels?ad_account_id=${encodeURIComponent(id)}`))
       
       if (!res.ok) {
         throw new Error(`Error al cargar pixels: ${res.status}`)
@@ -198,9 +229,8 @@ export function Settings() {
     setConfigError(null)
     
     try {
-      const response = await fetch(getApiUrl('/meta/configure'), {
+      const response = await fetchWithAuth(getApiUrl('/meta/configure'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           adAccountId: acct.account_id || acct.id,
           adAccountName: acct.name,
@@ -215,9 +245,6 @@ export function Settings() {
         const errorData = await response.json().catch(() => ({ error: { message: 'Error desconocido' } }))
         throw new Error(errorData.error?.message || `Error del servidor (${response.status})`)
       }
-      
-      const result = await response.json()
-      
       setMetaConfig({ 
         ad_account_id: acct.account_id || acct.id, 
         ad_account_name: acct.name, 
@@ -246,12 +273,12 @@ export function Settings() {
 
   const handleDisconnect = async () => {
     try {
-      const res = await fetch(getApiUrl('/meta/disconnect'), { method: 'POST' })
+      const res = await fetchWithAuth(getApiUrl('/meta/disconnect'), { method: 'POST' })
       if (res.ok) {
         setMetaConfig(null)
         setShowDisconnectModal(false)
         // Reload config to update UI
-        const configRes = await fetch(getApiUrl('/meta/config'))
+        const configRes = await fetchWithAuth(getApiUrl('/meta/config'))
         const configData = await configRes.json()
         setMetaConfig(configData?.data || null)
         toast.success('Cuenta desconectada', 'Tu cuenta de Meta Ads se ha desconectado correctamente.')
@@ -268,23 +295,26 @@ export function Settings() {
     { id: 'tracking', label: 'Tracking', icon: Icons.code, description: 'Dominios y Scripts' },
     { id: 'integrations', label: 'Integraciones', icon: Icons.globe, description: 'Conectar servicios' },
     { id: 'webhooks', label: 'Webhooks', icon: Icons.webhook, description: 'Endpoints de API' },
-    { id: 'logs', label: 'Logs', icon: Icons.logs, description: 'Historial de webhooks' },
     { id: 'database', label: 'Base de datos', icon: Icons.database, description: 'Respaldos y exportación' }
   ]
 
-  // Usar IDs dinámicos desde el backend
-  const accountId = accountConfig.account_id || 'loading...';
-  const subaccountId = accountConfig.subaccount_id || 'loading...';
-  const webhookBaseUrl = accountConfig.webhook_base_url || 'https://send.hollytrack.com';
-  
-  const webhookEndpoints: WebhookEndpoint[] = [
-    {
-      name: 'Contactos',
-      url: `${webhookBaseUrl}/webhook/contacts/${accountId}/${subaccountId}`,
-      method: 'POST',
-      description: 'Sincronizar contactos desde GoHighLevel',
-      fields: [
-        { name: 'contact_id', required: true, description: 'ID del contacto en GHL' },
+  const webhookEndpoints: WebhookEndpoint[] = useMemo(() => {
+    const baseUrl = accountConfig.webhook_base_url || 'https://send.hollytrack.com'
+    const endpoints = accountConfig.webhook_endpoints || {
+      contacts: `${baseUrl}/webhook/contacts`,
+      appointments: `${baseUrl}/webhook/appointments`,
+      payments: `${baseUrl}/webhook/payments`,
+      refunds: `${baseUrl}/webhook/refunds`
+    }
+
+    return [
+      {
+        name: 'Contactos',
+        url: endpoints.contacts,
+        method: 'POST',
+        description: 'Sincronizar contactos desde GoHighLevel',
+        fields: [
+          { name: 'contact_id', required: true, description: 'ID del contacto en GHL' },
         { name: 'first_name', required: false, description: 'Nombre del contacto' },
         { name: 'last_name', required: false, description: 'Apellido del contacto' },
         { name: 'email', required: false, description: 'Email del contacto' },
@@ -295,12 +325,12 @@ export function Settings() {
         { name: 'source', required: false, description: 'Fuente del contacto' },
       ]
     },
-    {
-      name: 'Citas',
-      url: `${webhookBaseUrl}/webhook/appointments/${accountId}/${subaccountId}`,
-      method: 'POST',
-      description: 'Registrar citas agendadas',
-      fields: [
+      {
+        name: 'Citas',
+        url: endpoints.appointments,
+        method: 'POST',
+        description: 'Registrar citas agendadas',
+        fields: [
         { name: 'contact_id', required: true, description: 'ID del contacto en GHL' },
         { name: 'title', required: false, description: 'Título de la cita' },
         { name: 'scheduled_at', required: false, description: 'Fecha y hora de la cita' },
@@ -308,31 +338,30 @@ export function Settings() {
         { name: 'status', required: false, description: 'Estado de la cita' },
       ]
     },
-    {
-      name: 'Pagos',
-      url: `${webhookBaseUrl}/webhook/payments/${accountId}/${subaccountId}`,
-      method: 'POST',
-      description: 'Registrar transacciones y pagos',
-      fields: [
+      {
+        name: 'Pagos',
+        url: endpoints.payments,
+        method: 'POST',
+        description: 'Registrar transacciones y pagos',
+        fields: [
         { name: 'transaction_id', required: true, description: 'ID de la transacción' },
-        { name: 'Monto', required: true, description: 'Monto del pago' },
-        { name: 'Nota', required: false, description: 'Descripción del pago' },
+        { name: 'monto', required: true, description: 'Monto del pago' },
+        { name: 'nota', required: false, description: 'Descripción del pago' },
         { name: 'contact_id', required: true, description: 'ID del contacto en GHL' },
         { name: 'currency', required: false, description: 'Moneda (default: MXN)' },
       ]
     },
-    {
-      name: 'Reembolsos',
-      url: `${webhookBaseUrl}/webhook/refunds/${accountId}/${subaccountId}`,
-      method: 'POST',
-      description: 'Procesar reembolsos',
-      fields: [
-        { name: 'transaction_id', required: true, description: 'ID de la transacción a reembolsar' },
-      ]
-    }
-  ]
-
-  const snippetCode = `<script defer src="https://hola.raulgomez.com.mx/snip.js" data-account="${accountId}"></script>`
+      {
+        name: 'Reembolsos',
+        url: endpoints.refunds,
+        method: 'POST',
+        description: 'Procesar reembolsos',
+        fields: [
+          { name: 'transaction_id', required: true, description: 'ID de la transacción a reembolsar' },
+        ]
+      }
+    ]
+  }, [accountConfig])
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -380,7 +409,7 @@ export function Settings() {
           <div className="flex-1">
             {activeSection === 'webhooks' && (
               <div className="space-y-4">
-                {accountId === 'loading...' && (
+                {isAccountConfigLoading && (
                   <Card variant="glass" className="p-4">
                     <div className="flex items-center gap-3 text-secondary">
                       <Icons.refresh className="w-5 h-5 animate-spin" />
@@ -472,14 +501,9 @@ export function Settings() {
                           size="sm"
                           onClick={() => {
                             setIsEditingAccount(false)
-                            // Reload data
-                            fetch(getApiUrl('/subaccount'))
-                              .then(r => r.json())
-                              .then(res => {
-                                if (res?.data) setAccountData(res.data)
-                              })
+                            setAccountData(buildAccountData())
                           }}
-                          disabled={isSavingAccount}
+                          disabled={isSavingAccount || settingsLoading}
                         >
                           Cancelar
                         </Button>
@@ -490,43 +514,17 @@ export function Settings() {
                             setIsSavingAccount(true)
                             
                             try {
-                              const res = await fetch(getApiUrl('/subaccount'), {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(accountData)
-                              })
-                              
-                              if (!res.ok) {
-                                throw new Error(`Error ${res.status}: ${res.statusText}`)
-                              }
-                              
-                              const json = await res.json()
-                              
-                              if (json.success) {
-                                // Update global context
-                                window.dispatchEvent(new CustomEvent('subaccount-updated', { detail: json.data || accountData }))
-                                
-                                // Update local state with returned data
-                                if (json.data) {
-                                  setAccountData(json.data)
-                                }
-                                
-                                // Show success message
-                                toast.addToast('success', 'Configuración guardada', 'Los cambios han sido guardados exitosamente')
-                                
-                                // Exit edit mode - moved before finally
-                                setIsEditingAccount(false)
-                                setIsSavingAccount(false)
-                              } else {
-                                throw new Error(json.message || 'Error al guardar la configuración')
-                              }
+                              await persistSettings(accountData)
+                              toast.success('Configuración guardada', 'Los cambios han sido guardados exitosamente')
+                              setIsEditingAccount(false)
                             } catch (error: any) {
                               console.error('Error saving account:', error)
-                              toast.addToast('error', 'Error al guardar', error.message || 'No se pudo guardar la configuración')
+                              toast.error('Error al guardar', error?.message || 'No se pudo guardar la configuración')
+                            } finally {
                               setIsSavingAccount(false)
                             }
                           }}
-                          disabled={isSavingAccount}
+                          disabled={isSavingAccount || settingsLoading}
                         >
                           {isSavingAccount ? (
                             <><Icons.refresh className="w-4 h-4 mr-2 animate-spin" /> Guardando...</>
@@ -545,12 +543,12 @@ export function Settings() {
                       {isEditingAccount ? (
                         <input
                           type="text"
-                          value={accountData.subaccount_name || ''}
-                          onChange={(e) => setAccountData({...accountData, subaccount_name: e.target.value})}
+                          value={accountData.account_name || ''}
+                          onChange={(e) => setAccountData({...accountData, account_name: e.target.value})}
                           className="mt-1 w-full px-3 py-2 glass text-primary rounded-lg border border-primary/20 focus:border-primary/40 focus:outline-none"
                         />
                       ) : (
-                        <p className="mt-1 text-primary">{accountData.subaccount_name || 'Sin configurar'}</p>
+                        <p className="mt-1 text-primary">{accountData.account_name || 'Sin configurar'}</p>
                       )}
                     </div>
                     
@@ -746,7 +744,7 @@ export function Settings() {
                             <p className="text-sm text-secondary">Sincronización de campañas y métricas</p>
                             {metaConfig?.ad_account_id && (
                               <div className="mt-2 text-xs text-tertiary">
-                                <div>Cuenta: <span className="text-primary">{metaConfig.ad_account_name} (act_{metaConfig.ad_account_id})</span></div>
+                                <div>Cuenta: <span className="text-primary">{metaConfig.ad_account_name} ({metaConfig.ad_account_id})</span></div>
                                 {metaConfig.pixel_id && (
                                   <div>Pixel: <span className="text-primary">{metaConfig.pixel_name} ({metaConfig.pixel_id})</span></div>
                                 )}
@@ -817,53 +815,6 @@ export function Settings() {
               </Card>
             )}
 
-            {activeSection === 'logs' && (
-              <Card variant="glass">
-                <div className="p-6">
-                  <h3 className="text-lg font-semibold text-primary mb-6">Logs de Webhooks</h3>
-                  <p className="text-secondary mb-4">Historial de eventos recibidos en los últimos 30 días</p>
-                  
-                  <div className="space-y-3">
-                    {/* Ejemplo de logs */}
-                    {[
-                      { id: 1, type: 'Contacto', status: 'success', time: 'Hace 2 minutos', endpoint: '/contacts' },
-                      { id: 2, type: 'Pago', status: 'success', time: 'Hace 15 minutos', endpoint: '/payments', amount: 'MXN $2,500' },
-                      { id: 3, type: 'Cita', status: 'error', time: 'Hace 1 hora', endpoint: '/appointments', error: 'Contact ID not found' },
-                      { id: 4, type: 'Contacto', status: 'success', time: 'Hace 2 horas', endpoint: '/contacts' },
-                      { id: 5, type: 'Reembolso', status: 'success', time: 'Hace 3 horas', endpoint: '/refunds', amount: 'MXN $500' },
-                    ].map((log) => (
-                      <div key={log.id} className="glass rounded-lg p-4 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className={cn(
-                            "w-2 h-2 rounded-full",
-                            log.status === 'success' ? "bg-green-400" : "bg-red-400"
-                          )} />
-                          <div>
-                            <div className="flex items-center gap-3">
-                              <span className="font-medium text-primary">{log.type}</span>
-                              <code className="text-xs text-tertiary font-mono">{log.endpoint}</code>
-                              {log.amount && (
-                                <span className="text-sm text-secondary">{log.amount}</span>
-                              )}
-                            </div>
-                            {log.error && (
-                              <p className="text-xs text-error mt-1">{log.error}</p>
-                            )}
-                          </div>
-                        </div>
-                        <span className="text-xs text-tertiary">{log.time}</span>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  <div className="mt-6 flex justify-center">
-                    <Button variant="secondary" size="sm">
-                      Ver todos los logs
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            )}
 
             {activeSection === 'database' && (
               <div className="space-y-4">
@@ -1017,7 +968,7 @@ export function Settings() {
                   <select className="w-full mt-1 glass text-primary rounded-lg p-2 border border-primary" value={selectedAdAccount} onChange={(e) => handleAdAccountChange(e.target.value)}>
                     <option value="">Selecciona una cuenta</option>
                     {adAccounts.map((a) => (
-                      <option key={a.id} value={a.account_id || a.id}>{a.name} (act_{a.account_id || a.id})</option>
+                      <option key={a.id} value={a.account_id || a.id}>{a.name} ({a.account_id || a.id})</option>
                     ))}
                   </select>
                 </div>
@@ -1038,7 +989,7 @@ export function Settings() {
                         value={sinceDate}
                         onChange={setSinceDate}
                         minDate={minSinceDate}
-                        maxDate={new Date().toISOString().slice(0,10)}
+                        maxDate={dateToApiString(new Date())}
                         placeholder="Seleccionar fecha inicial"
                       />
                     </div>

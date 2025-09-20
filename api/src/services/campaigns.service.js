@@ -1,155 +1,170 @@
 const { databasePool } = require('../config/database.config');
 const { checkMetaAdsTableExists } = require('../utils/meta-helper');
 
+const META_SOURCE_KEYWORDS = [
+  'facebook',
+  'facebook_paid',
+  'facebook ads',
+  'facebook_ads',
+  'facebookpaid',
+  'fb_ad',
+  'fbads',
+  'fb ads',
+  'fb_paid',
+  'meta',
+  'meta_ads',
+  'meta ads',
+  'meta paid'
+];
+
+const META_SOURCE_PATTERNS = META_SOURCE_KEYWORDS.map(keyword => `%${keyword}%`);
+
 class CampaignsService {
   async getCampaignsMetrics(startDate, endDate) {
     try {
-      // Check if Meta ads table exists
       const hasAdsTable = await checkMetaAdsTableExists();
 
-      // If table doesn't exist, return zeros
       if (!hasAdsTable) {
         console.log('[CAMPAIGNS] No Meta ads synced, returning zero metrics');
         return {
-          totalSpend: 0,
-          totalClicks: 0,
-          totalReach: 0,
-          totalLeads: 0,
-          totalSales: 0,
-          totalRevenue: 0,
+          revenue: 0,
+          spend: 0,
           roas: 0,
+          sales: 0,
+          leads: 0,
+          clicks: 0,
+          reach: 0,
           trends: {
-            spend: 0,
-            clicks: 0,
-            reach: 0,
-            leads: 0,
-            sales: 0,
             revenue: 0,
-            roas: 0
+            spend: 0,
+            roas: 0,
+            sales: 0,
+            leads: 0,
+            clicks: 0,
+            reach: 0
           }
         };
       }
 
-      // Calculate the previous period for comparison
-      const periodLength = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
-      const previousEndDate = new Date(startDate);
+      const dayMs = 24 * 60 * 60 * 1000;
+      const normalizedStart = new Date(startDate);
+      const normalizedEnd = new Date(endDate);
+      const diffMs = Math.max(0, normalizedEnd - normalizedStart);
+      const periodLength = Math.max(1, Math.round(diffMs / dayMs) + 1);
+
+      const previousEndDate = new Date(normalizedStart);
       previousEndDate.setDate(previousEndDate.getDate() - 1);
       const previousStartDate = new Date(previousEndDate);
       previousStartDate.setDate(previousStartDate.getDate() - periodLength + 1);
 
-      // Query for current period metrics - separate queries for unrelated data
-      const currentQuery = `
-        WITH meta_stats AS (
-          SELECT
-            COALESCE(SUM(spend), 0) as total_spend,
-            COALESCE(SUM(clicks), 0) as total_clicks,
-            COALESCE(SUM(reach), 0) as total_reach
-          FROM meta.meta_ads
-          WHERE date >= $1 AND date <= $2
-        ),
-        contact_stats AS (
-          SELECT COUNT(DISTINCT contact_id) as total_leads
-          FROM contacts
-          WHERE created_at >= $1 AND created_at <= $2
-        ),
-        payment_stats AS (
-          SELECT
-            COALESCE(SUM(p.amount), 0) as total_revenue,
-            COUNT(DISTINCT p.contact_id) as total_sales
-          FROM payments p
-          JOIN contacts c ON p.contact_id = c.contact_id
-          WHERE p.paid_at >= $1 AND p.paid_at <= $2
-            AND p.status = 'completed'
-            AND c.created_at >= $1 AND c.created_at <= $2
-            AND c.attribution_ad_id IS NOT NULL
-        )
+      const metaQuery = `
         SELECT
-          m.total_spend,
-          m.total_clicks,
-          m.total_reach,
-          c.total_leads,
-          p.total_revenue,
-          p.total_sales
-        FROM meta_stats m
-        CROSS JOIN contact_stats c
-        CROSS JOIN payment_stats p
+          COALESCE(SUM(spend), 0) AS total_spend,
+          COALESCE(SUM(clicks), 0) AS total_clicks,
+          COALESCE(SUM(reach), 0) AS total_reach
+        FROM meta.meta_ads
+        WHERE date >= $1 AND date <= $2
       `;
 
-      // Query for previous period metrics - same structure
-      const previousQuery = `
-        WITH meta_stats AS (
-          SELECT
-            COALESCE(SUM(spend), 0) as total_spend,
-            COALESCE(SUM(clicks), 0) as total_clicks,
-            COALESCE(SUM(reach), 0) as total_reach
-          FROM meta.meta_ads
-          WHERE date >= $1 AND date <= $2
-        ),
-        contact_stats AS (
-          SELECT COUNT(DISTINCT contact_id) as total_leads
-          FROM contacts
-          WHERE created_at >= $1 AND created_at <= $2
-        ),
-        payment_stats AS (
-          SELECT
-            COALESCE(SUM(p.amount), 0) as total_revenue,
-            COUNT(DISTINCT p.contact_id) as total_sales
-          FROM payments p
-          JOIN contacts c ON p.contact_id = c.contact_id
-          WHERE p.paid_at >= $1 AND p.paid_at <= $2
-            AND p.status = 'completed'
-            AND c.created_at >= $1 AND c.created_at <= $2
-            AND c.attribution_ad_id IS NOT NULL
-        )
-        SELECT
-          m.total_spend,
-          m.total_clicks,
-          m.total_reach,
-          c.total_leads,
-          p.total_revenue,
-          p.total_sales
-        FROM meta_stats m
-        CROSS JOIN contact_stats c
-        CROSS JOIN payment_stats p
+      const leadsQuery = `
+        SELECT COUNT(*) AS leads
+        FROM contacts c
+        WHERE c.created_at >= $1 AND c.created_at <= $2
+          AND c.attribution_ad_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM meta.meta_ads ma
+            WHERE ma.ad_id = c.attribution_ad_id
+              AND (
+                ma.date::date = c.created_at::date
+                OR (
+                  ma.date::date >= (c.created_at::date - INTERVAL '3 days')
+                  AND ma.date::date <= c.created_at::date
+                )
+              )
+          )
       `;
 
-      // Execute both queries in parallel
-      const [currentResult, previousResult] = await Promise.all([
-        databasePool.query(currentQuery, [startDate, endDate]),
-        databasePool.query(previousQuery, [previousStartDate, previousEndDate])
+      const salesQuery = `
+        SELECT
+          COUNT(DISTINCT p.contact_id) AS sales,
+          COALESCE(SUM(p.amount), 0) AS revenue
+        FROM contacts c
+        JOIN payments p ON p.contact_id = c.contact_id AND p.status = 'completed'
+        WHERE c.created_at >= $1 AND c.created_at <= $2
+          AND c.attribution_ad_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM meta.meta_ads ma
+            WHERE ma.ad_id = c.attribution_ad_id
+              AND (
+                ma.date::date = c.created_at::date
+                OR (
+                  ma.date::date >= (c.created_at::date - INTERVAL '3 days')
+                  AND ma.date::date <= c.created_at::date
+                )
+              )
+          )
+      `;
+
+      const [
+        currentMetaRes,
+        previousMetaRes,
+        currentLeadsRes,
+        previousLeadsRes,
+        currentSalesRes,
+        previousSalesRes
+      ] = await Promise.all([
+        databasePool.query(metaQuery, [normalizedStart, normalizedEnd]),
+        databasePool.query(metaQuery, [previousStartDate, previousEndDate]),
+        databasePool.query(leadsQuery, [normalizedStart, normalizedEnd]),
+        databasePool.query(leadsQuery, [previousStartDate, previousEndDate]),
+        databasePool.query(salesQuery, [normalizedStart, normalizedEnd]),
+        databasePool.query(salesQuery, [previousStartDate, previousEndDate])
       ]);
 
-      const current = currentResult.rows[0];
-      const previous = previousResult.rows[0];
+      const currentMeta = currentMetaRes.rows[0] || {};
+      const previousMeta = previousMetaRes.rows[0] || {};
+      const currentLeads = parseInt(currentLeadsRes.rows[0]?.leads, 10) || 0;
+      const previousLeads = parseInt(previousLeadsRes.rows[0]?.leads, 10) || 0;
+      const currentSalesRow = currentSalesRes.rows[0] || {};
+      const previousSalesRow = previousSalesRes.rows[0] || {};
 
-      const totalSpend = parseFloat(current.total_spend) || 0;
-      const totalRevenue = parseFloat(current.total_revenue) || 0;
-      const prevTotalSpend = parseFloat(previous.total_spend) || 0;
-      const prevTotalRevenue = parseFloat(previous.total_revenue) || 0;
+      const currentSpend = parseFloat(currentMeta.total_spend) || 0;
+      const previousSpend = parseFloat(previousMeta.total_spend) || 0;
+      const currentClicks = parseInt(currentMeta.total_clicks, 10) || 0;
+      const previousClicks = parseInt(previousMeta.total_clicks, 10) || 0;
+      const currentReach = parseInt(currentMeta.total_reach, 10) || 0;
+      const previousReach = parseInt(previousMeta.total_reach, 10) || 0;
+      const currentRevenue = parseFloat(currentSalesRow.revenue) || 0;
+      const previousRevenue = parseFloat(previousSalesRow.revenue) || 0;
+      const currentSales = parseInt(currentSalesRow.sales, 10) || 0;
+      const previousSales = parseInt(previousSalesRow.sales, 10) || 0;
 
-      const roas = totalSpend > 0 ? totalRevenue / totalSpend : 0;
-      const prevRoas = prevTotalSpend > 0 ? prevTotalRevenue / prevTotalSpend : 0;
+      const currentRoas = currentSpend > 0 ? currentRevenue / currentSpend : 0;
+      const previousRoas = previousSpend > 0 ? previousRevenue / previousSpend : 0;
 
-      // Calculate percentage changes
-      const calculateChange = (current, previous) => {
-        if (previous === 0) return current > 0 ? 100 : 0;
-        return ((current - previous) / Math.abs(previous)) * 100;
+      const calculateChange = (currentValue, previousValue) => {
+        if (previousValue === 0) {
+          return currentValue > 0 ? 100 : 0;
+        }
+        return ((currentValue - previousValue) / Math.abs(previousValue)) * 100;
       };
 
       return {
-        revenue: totalRevenue,
-        spend: totalSpend,
-        roas: roas,
-        sales: parseInt(current.total_sales) || 0,
-        leads: parseInt(current.total_leads) || 0,
-        clicks: parseInt(current.total_clicks) || 0,
+        revenue: currentRevenue,
+        spend: currentSpend,
+        roas: currentRoas,
+        sales: currentSales,
+        leads: currentLeads,
+        clicks: currentClicks,
+        reach: currentReach,
         trends: {
-          revenue: calculateChange(totalRevenue, prevTotalRevenue),
-          spend: calculateChange(totalSpend, prevTotalSpend),
-          roas: calculateChange(roas, prevRoas),
-          sales: calculateChange(parseInt(current.total_sales), parseInt(previous.total_sales)),
-          leads: calculateChange(parseInt(current.total_leads), parseInt(previous.total_leads)),
-          clicks: calculateChange(parseInt(current.total_clicks), parseInt(previous.total_clicks))
+          revenue: calculateChange(currentRevenue, previousRevenue),
+          spend: calculateChange(currentSpend, previousSpend),
+          roas: calculateChange(currentRoas, previousRoas),
+          sales: calculateChange(currentSales, previousSales),
+          leads: calculateChange(currentLeads, previousLeads),
+          clicks: calculateChange(currentClicks, previousClicks),
+          reach: calculateChange(currentReach, previousReach)
         }
       };
     } catch (error) {
@@ -191,16 +206,30 @@ class CampaignsService {
         [startDate, endDate]
       )
 
-      // 2) Visitors from tracking sessions - YA FILTRADO
+      // 2) Visitors from tracking sessions - SOLO DE FACEBOOK/META
       const visitorsRes = await databasePool.query(
-        `SELECT ad_id, COUNT(DISTINCT visitor_id) AS visitors
-         FROM tracking.sessions
-         WHERE ad_id IS NOT NULL
-           AND started_at >= $1
-           AND started_at <= $2
+        `WITH filtered_sessions AS (
+           SELECT
+             ad_id,
+             visitor_id,
+             DATE_TRUNC('day', started_at)::date AS visit_date
+           FROM tracking.sessions
+           WHERE ad_id IS NOT NULL
+             AND visitor_id IS NOT NULL
+             AND started_at >= $1
+             AND started_at <= $2
+             AND (
+               LOWER(COALESCE(channel, '')) LIKE ANY($3::text[])
+               OR LOWER(COALESCE(source_platform, '')) LIKE ANY($3::text[])
+               OR LOWER(COALESCE(utm_source, '')) LIKE ANY($3::text[])
+             )
+         )
+         SELECT ad_id,
+                COUNT(DISTINCT (visitor_id, visit_date)) AS visitors
+         FROM filtered_sessions
          GROUP BY ad_id
         `,
-        [startDate, endDate]
+        [startDate, endDate, META_SOURCE_PATTERNS]
       )
 
       // 3) Leads from contacts - FILTRADO POR TENANT
@@ -228,7 +257,7 @@ class CampaignsService {
 
       // 4) Appointments - FILTRADO POR TENANT
       const apptsRes = await databasePool.query(
-        `SELECT c.attribution_ad_id AS ad_id, COUNT(*) AS appointments
+        `SELECT c.attribution_ad_id AS ad_id, COUNT(DISTINCT a.contact_id) AS appointments
          FROM appointments a
          JOIN contacts c ON a.contact_id = c.contact_id
          WHERE c.attribution_ad_id IS NOT NULL
@@ -253,7 +282,7 @@ class CampaignsService {
       // 5) Sales/Revenue - FILTRADO POR TENANT
       const salesRes = await databasePool.query(
         `SELECT c.attribution_ad_id AS ad_id,
-                COUNT(DISTINCT p.id) AS sales,
+                COUNT(DISTINCT p.contact_id) AS sales,
                 COALESCE(SUM(p.amount),0) AS revenue
          FROM contacts c
          JOIN payments p ON p.contact_id = c.contact_id
@@ -432,6 +461,242 @@ class CampaignsService {
     }
   }
 
+  async _resolveAdIds({ adIds = [], adSetIds = [], campaignIds = [], startDate, endDate }) {
+    const adIdSet = new Set()
+
+    const addIds = ids => {
+      if (!ids) return
+      const collection = Array.isArray(ids) ? ids : [ids]
+      collection
+        .map(id => (id === undefined || id === null ? '' : String(id).trim()))
+        .filter(Boolean)
+        .forEach(id => adIdSet.add(id))
+    }
+
+    addIds(adIds)
+
+    const fetchFromMeta = async (ids, column) => {
+      if (!ids) return
+      const list = Array.isArray(ids) ? ids : [ids]
+      const cleaned = list
+        .map(id => (id === undefined || id === null ? '' : String(id).trim()))
+        .filter(Boolean)
+
+      if (cleaned.length === 0) {
+        return
+      }
+
+      const query = `
+        SELECT DISTINCT ad_id
+        FROM meta.meta_ads
+        WHERE ${column} = ANY($1::text[])
+          AND ad_id IS NOT NULL
+      `
+
+      const params = [cleaned]
+      const result = await databasePool.query(query, params)
+      for (const row of result.rows) {
+        if (row?.ad_id) {
+          adIdSet.add(String(row.ad_id).trim())
+        }
+      }
+    }
+
+    await Promise.all([
+      fetchFromMeta(adSetIds, 'adset_id'),
+      fetchFromMeta(campaignIds, 'campaign_id')
+    ])
+
+    const resolved = Array.from(adIdSet)
+
+    console.log('[Campaigns] _resolveAdIds', {
+      inputAdIds: Array.isArray(adIds) ? adIds : [adIds],
+      adSetIds,
+      campaignIds,
+      startDate,
+      endDate,
+      resolved
+    })
+
+    return resolved
+  }
+
+  // IMPORTANTE: MODELO DE LAST ATTRIBUTION
+  // Los contactos se atribuyen a la campaña/ad cuando se CREAN (c.created_at)
+  // NO cuando hacen una acción posterior (pago, cita, etc)
+  // Esto significa que un contacto creado en enero y que paga en septiembre
+  // se atribuye a las métricas de ENERO, no de septiembre
+  async getContactsByHierarchy({
+    adIds = [],
+    adSetIds = [],
+    campaignIds = [],
+    startDate,
+    endDate,
+    type = 'leads'
+  }) {
+    try {
+      const resolvedAdIds = await this._resolveAdIds({
+        adIds,
+        adSetIds,
+        campaignIds,
+        startDate,
+        endDate
+      });
+
+      console.log('[Campaigns] getContactsByHierarchy input', {
+        rawAdIds: Array.isArray(adIds) ? adIds : [adIds],
+        resolvedAdIds,
+        startDate,
+        endDate,
+        type
+      });
+
+      if (resolvedAdIds.length === 0) {
+        console.log('[Campaigns] getContactsByHierarchy sin ad_ids resueltos');
+        return [];
+      }
+
+      const allowedTypes = new Set(['leads', 'appointments', 'sales']);
+      const normalizedType = allowedTypes.has(type) ? type : 'leads';
+
+      const normalizedAdSetIds = (Array.isArray(adSetIds) ? adSetIds : [])
+        .map(id => (id === undefined || id === null ? '' : String(id).trim()))
+        .filter(Boolean);
+      const normalizedCampaignIds = (Array.isArray(campaignIds) ? campaignIds : [])
+        .map(id => (id === undefined || id === null ? '' : String(id).trim()))
+        .filter(Boolean);
+
+      const targetConditions = [];
+      const queryParams = [];
+      let paramIndex = 1;
+
+      if (resolvedAdIds.length > 0) {
+        targetConditions.push(`ma.ad_id = ANY($${paramIndex}::text[])`);
+        queryParams.push(resolvedAdIds);
+        paramIndex += 1;
+      }
+
+      if (normalizedAdSetIds.length > 0) {
+        targetConditions.push(`ma.adset_id = ANY($${paramIndex}::text[])`);
+        queryParams.push(normalizedAdSetIds);
+        paramIndex += 1;
+      }
+
+      if (normalizedCampaignIds.length > 0) {
+        targetConditions.push(`ma.campaign_id = ANY($${paramIndex}::text[])`);
+        queryParams.push(normalizedCampaignIds);
+        paramIndex += 1;
+      }
+
+      if (targetConditions.length === 0) {
+        console.warn('[Campaigns] getContactsByHierarchy sin condiciones de jerarquía');
+        return [];
+      }
+
+      // Para sales: usar EXISTS para no duplicar contactos
+      // Para appointments: igual con EXISTS
+      const typeFilterForScope = normalizedType === 'sales'
+        ? `AND EXISTS (SELECT 1 FROM payments p WHERE p.contact_id = c.contact_id AND p.status = 'completed')`
+        : normalizedType === 'appointments'
+          ? `AND EXISTS (SELECT 1 FROM appointments a WHERE a.contact_id = c.contact_id)`
+          : '';
+
+      const scopedContactsQuery = `
+        WITH scoped AS (
+          SELECT DISTINCT c.contact_id
+          FROM contacts c
+          JOIN meta.meta_ads ma ON ma.ad_id = c.attribution_ad_id
+          WHERE c.attribution_ad_id IS NOT NULL
+            -- Filtrar por fecha de creación del contacto
+            AND c.created_at >= $${paramIndex}
+            AND c.created_at <= $${paramIndex + 1}
+            AND (
+              ${targetConditions.join('\n              OR ')}
+            )
+            -- Validar que había una campaña activa cuando se creó el contacto
+            AND EXISTS (
+              SELECT 1 FROM meta.meta_ads ma2
+              WHERE ma2.ad_id = c.attribution_ad_id
+              AND ma2.date::date BETWEEN (c.created_at::date - INTERVAL '3 days') AND c.created_at::date
+            )
+            ${typeFilterForScope}
+        )
+        SELECT
+          c.contact_id,
+          c.first_name,
+          c.last_name,
+          c.email,
+          c.phone,
+          c.company,
+          c.attribution_ad_id,
+          c.ext_crm_id,
+          c.status,
+          c.source,
+          c.created_at,
+          c.updated_at,
+          COALESCE(appt_data.appointments, 0) AS appointment_count,
+          COALESCE(payment_data.payments, 0) AS payment_count,
+          COALESCE(payment_data.ltv, 0) AS ltv
+        FROM contacts c
+        JOIN scoped s ON s.contact_id = c.contact_id
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) AS appointments
+          FROM appointments a
+          WHERE a.contact_id = c.contact_id
+        ) AS appt_data ON true
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) AS payments,
+                 COALESCE(SUM(p.amount), 0) AS ltv
+          FROM payments p
+          WHERE p.contact_id = c.contact_id
+            AND p.status = 'completed'
+        ) AS payment_data ON true
+        ORDER BY c.created_at DESC
+      `;
+
+      queryParams.push(startDate, endDate);
+
+      const result = await databasePool.query(scopedContactsQuery, queryParams);
+
+      console.log('[Campaigns] getContactsByHierarchy resultados', {
+        count: result.rowCount
+      });
+
+      return result.rows.map(row => {
+        const appointmentCount = parseInt(row.appointment_count, 10) || 0;
+        const paymentCount = parseInt(row.payment_count, 10) || 0;
+        const ltv = parseFloat(row.ltv) || 0;
+
+        const firstName = row.first_name || '';
+        const lastName = row.last_name || '';
+        const fullName = `${firstName} ${lastName}`.trim();
+
+        // Un contacto es cliente si tiene al menos 1 pago completado (LTV > 0)
+        const isClient = paymentCount > 0 && ltv > 0;
+
+        return {
+          id: row.contact_id,
+          name: fullName || 'Sin nombre',
+          email: row.email,
+          phone: row.phone,
+          company: row.company,
+          attributionAdId: row.attribution_ad_id,
+          ghlId: row.ext_crm_id,
+          status: isClient ? 'client' : appointmentCount > 0 ? 'appointment' : 'lead',
+          source: row.source || 'Direct',
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          appointments: appointmentCount,
+          payments: paymentCount,
+          ltv
+        }
+      });
+    } catch (error) {
+      console.error('[Campaigns] Error fetching contacts by hierarchy:', error)
+      throw error
+    }
+  }
+
   async getHistoricalData(startDate, endDate) {
     try {
       // Generar datos diarios para el gráfico
@@ -495,6 +760,286 @@ class CampaignsService {
       throw error;
     }
   }
+
+  async getVisitorsByHierarchy({
+    adIds = [],
+    adSetIds = [],
+    campaignIds = [],
+    startDate,
+    endDate
+  }) {
+    try {
+      const resolvedAdIds = await this._resolveAdIds({
+        adIds,
+        adSetIds,
+        campaignIds,
+        startDate,
+        endDate
+      });
+
+      if (resolvedAdIds.length === 0) {
+        return [];
+      }
+
+      const query = `
+        WITH filtered_sessions AS (
+          SELECT
+            s.visitor_id,
+            s.ad_id,
+            DATE_TRUNC('day', s.started_at)::date AS visit_date,
+            MIN(s.started_at) AS first_visit,
+            MAX(s.started_at) AS last_visit,
+            COUNT(*) AS session_count,
+            MAX(s.channel) AS channel,
+            MAX(s.source_platform) AS source_platform,
+            MAX(s.utm_source) AS utm_source,
+            MAX(s.utm_medium) AS utm_medium,
+            MAX(s.utm_campaign) AS utm_campaign
+          FROM tracking.sessions s
+          WHERE s.ad_id = ANY($1::text[])
+            AND s.visitor_id IS NOT NULL
+            AND s.started_at >= $2
+            AND s.started_at <= $3
+            AND (
+              LOWER(COALESCE(s.channel, '')) LIKE ANY($4::text[])
+              OR LOWER(COALESCE(s.source_platform, '')) LIKE ANY($4::text[])
+              OR LOWER(COALESCE(s.utm_source, '')) LIKE ANY($4::text[])
+            )
+          GROUP BY s.visitor_id, s.ad_id, DATE_TRUNC('day', s.started_at)
+        )
+        SELECT
+          fs.visitor_id,
+          fs.ad_id,
+          fs.visit_date,
+          fs.first_visit,
+          fs.last_visit,
+          fs.session_count,
+          fs.channel,
+          fs.source_platform,
+          fs.utm_source,
+          fs.utm_medium,
+          fs.utm_campaign,
+          c.contact_id,
+          c.first_name,
+          c.last_name,
+          c.email,
+          c.phone,
+          c.created_at AS contact_created_at,
+          COALESCE(payment_stats.total_amount, 0) AS ltv
+        FROM filtered_sessions fs
+        LEFT JOIN contacts c ON c.visitor_id = fs.visitor_id
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(SUM(p.amount), 0) AS total_amount
+          FROM payments p
+          WHERE c.contact_id IS NOT NULL
+            AND p.contact_id = c.contact_id
+            AND p.status = 'completed'
+        ) AS payment_stats ON true
+        ORDER BY fs.first_visit DESC
+      `;
+
+      const result = await databasePool.query(query, [resolvedAdIds, startDate, endDate, META_SOURCE_PATTERNS]);
+
+      return result.rows.map(row => {
+        const sessionCount = parseInt(row.session_count, 10) || 1;
+        const ltv = parseFloat(row.ltv) || 0;
+        const contactName = `${row.first_name || ''} ${row.last_name || ''}`.trim();
+
+        const contact = row.contact_id
+          ? {
+              id: row.contact_id,
+              name: contactName || null,
+              email: row.email,
+              phone: row.phone,
+              ltv
+            }
+          : null;
+
+        return {
+          visitorId: row.visitor_id,
+          adId: row.ad_id,
+          visitDate: row.visit_date,
+          firstVisit: row.first_visit,
+          lastVisit: row.last_visit,
+          sessionCount,
+          totalPageviews: sessionCount,
+          hasContact: Boolean(row.contact_id),
+          contact,
+          sources: row.channel || row.source_platform || row.utm_source || 'Facebook',
+          device: {
+            type: 'unknown',
+            browser: 'unknown'
+          },
+          location: {
+            country: 'unknown',
+            city: 'unknown'
+          }
+        };
+      });
+    } catch (error) {
+      console.error('[Campaigns] Error fetching visitors by hierarchy:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Obtener contactos únicos por tipo de evento (leads, appointments, sales)
+   * Método creado desde cero para el modal de detalles de contactos
+   */
+  async getUniqueContactsByType({ adIds, startDate, endDate, type }) {
+    try {
+      // Verificar si existe la tabla de Meta ads
+      const hasAdsTable = await checkMetaAdsTableExists();
+
+      if (!hasAdsTable) {
+        console.log('[CAMPAIGNS] No Meta ads table found, returning empty contacts');
+        return [];
+      }
+
+      // LOG DEBUG: Ver qué fechas están llegando al servicio
+      console.log('🔍 SERVICIO - Fechas recibidas:', {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        type
+      });
+
+      // Mapeo de tipo a tabla/campo correspondiente
+      let query;
+      // SIMPLIFICADO: Solo pasamos las fechas, sin filtro de ad_ids por ahora
+      const params = [startDate, endDate];
+
+      switch(type) {
+        case 'leads':
+          // IMPORTANTE: Siempre filtrar por created_at del contacto para atribución correcta
+          query = `
+            SELECT DISTINCT
+              c.contact_id,
+              c.name,
+              c.email,
+              c.phone,
+              c.created_at as event_date,
+              c.status,
+              0 as revenue,
+              c.source as campaign_name,
+              '' as adset_name,
+              '' as ad_name,
+              COALESCE(c.source, 'Direct') as source
+            FROM contacts c
+            WHERE
+              c.created_at >= $1
+              AND c.created_at <= $2
+              AND c.status IN ('lead', 'appointment', 'appointment_scheduled', 'client')
+            ORDER BY c.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        case 'appointments':
+          // IMPORTANTE: Filtrar por created_at del CONTACTO, no por fecha de cita
+          query = `
+            SELECT DISTINCT
+              c.contact_id,
+              c.name,
+              c.email,
+              c.phone,
+              c.created_at as event_date,
+              a.status as appointment_status,
+              0 as revenue,
+              COALESCE(c.source, 'Direct') as campaign_name,
+              '' as adset_name,
+              '' as ad_name,
+              COALESCE(c.source, 'Direct') as source
+            FROM contacts c
+            INNER JOIN appointments a ON a.contact_id = c.contact_id
+            WHERE
+              c.created_at >= $1
+              AND c.created_at <= $2
+            ORDER BY c.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        case 'sales':
+          // IMPORTANTE: Agrupar por contacto y sumar LTV total
+          // Un contacto es cliente si tiene al menos 1 pago completado
+          query = `
+            SELECT DISTINCT
+              c.contact_id,
+              c.name,
+              c.email,
+              c.phone,
+              c.created_at as event_date,
+              c.created_at as createdAt,
+              'client' as status,
+              COUNT(DISTINCT p.id) as payments,
+              (SELECT COUNT(*) FROM appointments a WHERE a.contact_id = c.contact_id) as appointments,
+              COALESCE(SUM(p.amount), 0) as ltv,
+              COALESCE(SUM(p.amount), 0) as revenue,
+              COALESCE(c.source, 'Direct') as campaign_name,
+              '' as adset_name,
+              '' as ad_name,
+              COALESCE(c.source, 'Direct') as source
+            FROM contacts c
+            INNER JOIN payments p ON p.contact_id = c.contact_id AND p.status = 'completed'
+            WHERE
+              c.created_at >= $1
+              AND c.created_at <= $2
+            GROUP BY
+              c.contact_id,
+              c.name,
+              c.email,
+              c.phone,
+              c.created_at,
+              c.source
+            HAVING COUNT(p.id) > 0
+            ORDER BY c.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        default:
+          throw new Error(`Invalid contact type: ${type}`);
+      }
+
+
+      // Ejecutar query con los parámetros
+      const result = await databasePool.query(query, params);
+
+
+      // Formatear los resultados
+      const contacts = result.rows.map(row => ({
+        id: row.contact_id || row.payment_id || Math.random().toString(36).substring(7),
+        contact_id: row.contact_id || row.payment_id,
+        name: row.name || 'Sin nombre',
+        email: row.email,
+        phone: row.phone,
+        event_date: row.event_date,
+        created_at: row.event_date,
+        createdAt: row.createdat || row.event_date,
+        status: row.status,
+        value: row.revenue || 0,
+        revenue: row.revenue || 0,
+        ltv: parseFloat(row.ltv) || 0,
+        payments: parseInt(row.payments) || 0,
+        appointments: parseInt(row.appointments) || 0,
+        // Metadata adicional
+        source: row.source,
+        campaign_name: row.campaign_name,
+        adset_name: row.adset_name,
+        ad_name: row.ad_name
+      }));
+
+      console.log(`[CAMPAIGNS] Found ${contacts.length} unique ${type} for ads:`, adIds.slice(0, 3));
+
+      return contacts;
+
+    } catch (error) {
+      console.error('[CAMPAIGNS] Error getting unique contacts by type:', error);
+      throw error;
+    }
+  }
+
+
 }
 
 module.exports = new CampaignsService();

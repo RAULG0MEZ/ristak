@@ -100,10 +100,9 @@ export function Dashboard() {
           })}
         </div>
 
-        {/* Gráficos de Evolución */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-          <RevenueChart title="Ingresos" dataKey="income" />
-          <RevenueChart title="Pagos" dataKey="expenses" />
+        {/* Gráfico de Métricas Financieras */}
+        <div className="grid grid-cols-1 gap-4 sm:gap-6">
+          <RevenueChart />
         </div>
 
         {/* Funnel de Conversión y Fuentes de Tráfico */}

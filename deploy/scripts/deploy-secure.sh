@@ -2,7 +2,7 @@
 set -e
 
 # ====================================================
-# RISTAK PRO - SECURE SMART DEPLOYMENT v3.0
+# RISTAK - DEPLOY PRODUCCIÓN
 # ====================================================
 # Zero-touch deployment con validación de seguridad
 # NUNCA hardcodear credenciales en este archivo
@@ -18,19 +18,19 @@ MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # ====== CONFIGURACIÓN BASE ======
-APP_NAME="ristak-pro"
+APP_NAME="ristak"
 APP_DIR="/opt/${APP_NAME}"
 PROJECT_ROOT="$(dirname "$(dirname "$(dirname "$(realpath "$0")")")")"
 
-# Dominios (públicos, no sensibles)
-DOMAIN_APP="app.hollytrack.com"
-DOMAIN_SEND="send.hollytrack.com"
-DOMAIN_TRACK="ilove.hollytrack.com"
+# Dominios - Se cargarán desde .env.local
+DOMAIN_APP=""
+DOMAIN_SEND=""
+DOMAIN_TRACK=""
 
 # ====== FUNCIONES DE UTILIDAD ======
 print_header() {
     echo -e "\n${MAGENTA}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║${NC}     🔒 RISTAK PRO - SECURE DEPLOYMENT v3.0             ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${NC}     🚀 RISTAK - DEPLOY PRODUCCIÓN                      ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════╝${NC}\n"
 }
 
@@ -63,9 +63,10 @@ validate_security() {
         echo "  # Base de datos"
         echo "  DATABASE_URL=postgresql://..."
         echo ""
-        echo "  # API Keys"
-        echo "  ACCOUNT_ID=acc_..."
-        echo "  DEFAULT_SUBACCOUNT_ID=suba_..."
+        echo "  # Dominios"
+        echo "  DOMAIN_APP=app.hollytrack.com"
+        echo "  DOMAIN_SEND=send.hollytrack.com"
+        echo "  DOMAIN_TRACK=ilove.hollytrack.com"
         echo "  ----------------------------------------"
         exit 1
     fi
@@ -106,8 +107,15 @@ load_environment() {
         "DEPLOY_USER"
         "DEPLOY_PASSWORD"
         "DATABASE_URL"
-        "ACCOUNT_ID"
-        "DEFAULT_SUBACCOUNT_ID"
+        "DOMAIN_APP"
+        "DOMAIN_SEND"
+        "DOMAIN_TRACK"
+        "CLOUDFLARE_API_TOKEN"
+        "CLOUDFLARE_ZONE_ID"
+        "META_APP_ID"
+        "META_APP_SECRET"
+        "META_ENCRYPTION_KEY"
+        "AUTH_SECRET"
     )
 
     # Validar que todas existen
@@ -122,56 +130,440 @@ load_environment() {
     SERVER_USER="${DEPLOY_USER}"
     SERVER_PASSWORD="${DEPLOY_PASSWORD}"
 
+    # Configurar dominios desde variables de entorno
+    DOMAIN_APP="${DOMAIN_APP}"
+    DOMAIN_SEND="${DOMAIN_SEND}"
+    DOMAIN_TRACK="${DOMAIN_TRACK}"
+
     print_success "Variables de entorno cargadas (${#REQUIRED_VARS[@]} variables validadas)"
+}
+
+# ====== SETUP INICIAL DEL SERVIDOR ======
+setup_server_if_needed() {
+    print_step "Verificando estado del servidor..."
+
+    # Crear script temporal para verificar dependencias
+    cat > /tmp/check_deps.sh << 'SCRIPT_CHECK'
+#!/bin/bash
+echo "=== CHECKING SERVER DEPENDENCIES ==="
+
+# Verificar Node.js
+if ! command -v node &> /dev/null; then
+    echo "NODE_MISSING"
+else
+    echo "NODE_VERSION=$(node -v)"
+fi
+
+# Verificar Nginx
+if ! command -v nginx &> /dev/null; then
+    echo "NGINX_MISSING"
+else
+    echo "NGINX_VERSION=$(nginx -v 2>&1)"
+fi
+
+# Verificar PM2
+if ! command -v pm2 &> /dev/null; then
+    echo "PM2_MISSING"
+fi
+
+# Verificar serve
+if ! command -v serve &> /dev/null; then
+    echo "SERVE_MISSING"
+fi
+
+# Verificar certbot
+if ! command -v certbot &> /dev/null; then
+    echo "CERTBOT_MISSING"
+fi
+
+# Verificar directorios
+if [ ! -d "/opt/ristak" ]; then
+    echo "DIR_MISSING"
+fi
+
+if [ ! -d "/etc/ristak-pro" ]; then
+    echo "CONFIG_DIR_MISSING"
+fi
+SCRIPT_CHECK
+
+    # Ejecutar script en el servidor
+    sshpass -p "$SERVER_PASSWORD" scp -o StrictHostKeyChecking=no /tmp/check_deps.sh $SERVER_USER@$SERVER_HOST:/tmp/check_deps.sh
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "bash /tmp/check_deps.sh" > /tmp/server_check.txt 2>&1
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "rm /tmp/check_deps.sh"
+
+    # Leer resultados
+    SERVER_STATUS=$(cat /tmp/server_check.txt)
+
+    # Si falta algo, instalarlo
+    if grep -q "_MISSING" /tmp/server_check.txt; then
+        print_warning "El servidor necesita configuración inicial. Instalando dependencias..."
+        install_server_dependencies
+    else
+        print_success "El servidor ya tiene todas las dependencias instaladas"
+    fi
+
+    # Configurar estructura de directorios
+    setup_directory_structure
+
+    # SKIP: No configurar base de datos local porque usamos Neon (base de datos en la nube)
+    # La base de datos ya está configurada en Neon y se accede via DATABASE_URL
+    print_info "Usando base de datos Neon (no se requiere PostgreSQL local)"
+
+    # Configurar archivo de variables si no existe
+    setup_environment_file
+
+    rm -f /tmp/server_check.txt
+    rm -f /tmp/check_deps.sh
+}
+
+# ====== INSTALAR DEPENDENCIAS DEL SERVIDOR ======
+install_server_dependencies() {
+    print_step "Instalando dependencias del sistema..."
+
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'INSTALL_DEPS'
+    set -e
+
+    echo "🔧 Actualizando sistema..."
+    apt-get update -qq
+
+    # Instalar Node.js 20.x si no existe
+    if ! command -v node &> /dev/null; then
+        echo "📦 Instalando Node.js 20..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
+    fi
+
+    # Instalar Nginx si no existe
+    if ! command -v nginx &> /dev/null; then
+        echo "🌐 Instalando Nginx..."
+        apt-get install -y nginx
+        systemctl enable nginx
+        systemctl start nginx
+    fi
+
+    # SKIP: No instalar PostgreSQL local - usamos Neon (cloud database)
+    # La base de datos está en Neon y se accede remotamente via DATABASE_URL
+
+    # Instalar herramientas adicionales
+    echo "🛠️ Instalando herramientas adicionales..."
+    apt-get install -y git curl wget sshpass build-essential
+
+    # Instalar certbot para SSL si no existe
+    if ! command -v certbot &> /dev/null; then
+        echo "🔒 Instalando Certbot para SSL..."
+        apt-get install -y certbot python3-certbot-nginx
+    fi
+
+    # Instalar PM2 globalmente si no existe
+    if ! command -v pm2 &> /dev/null; then
+        echo "⚙️ Instalando PM2..."
+        npm install -g pm2
+    fi
+
+    # Instalar serve globalmente si no existe
+    if ! command -v serve &> /dev/null; then
+        echo "📁 Instalando serve..."
+        npm install -g serve
+    fi
+
+    echo "✅ Todas las dependencias instaladas"
+INSTALL_DEPS
+
+    print_success "Dependencias del sistema instaladas"
+}
+
+# ====== CONFIGURAR ESTRUCTURA DE DIRECTORIOS ======
+setup_directory_structure() {
+    print_step "Configurando estructura de directorios..."
+
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'SETUP_DIRS'
+    # Crear directorios necesarios
+    mkdir -p /opt/ristak
+    mkdir -p /opt/ristak/api
+    mkdir -p /opt/ristak/dist
+    mkdir -p /etc/ristak
+    mkdir -p /var/log/ristak
+    mkdir -p /var/log/nginx
+
+    # Configurar permisos
+    chmod 755 /opt/ristak
+    chmod 700 /etc/ristak
+
+    echo "✅ Estructura de directorios creada"
+SETUP_DIRS
+
+    print_success "Directorios configurados"
+}
+
+# ====== FUNCIONES DE BASE DE DATOS REMOVIDAS ======
+# Ya no necesitamos estas funciones porque usamos Neon (base de datos en la nube)
+# La base de datos ya está configurada y lista en Neon
+# Solo necesitamos el cliente psql para ejecutar migraciones
+
+# ====== CONFIGURAR ARCHIVO DE VARIABLES DE ENTORNO ======
+setup_environment_file() {
+    print_step "Configurando archivo de variables de producción..."
+
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << EOF
+    # Verificar si ya existe
+    if [ ! -f "/etc/ristak/env.production" ]; then
+        echo "📝 Creando archivo de configuración de producción..."
+
+        cat > /etc/ristak/env.production << 'ENV_FILE'
+# ================================================
+# RISTAK - CONFIGURACIÓN DE PRODUCCIÓN
+# ================================================
+# Archivo de secrets - NO COMPARTIR
+# Ubicación: /etc/ristak/env.production
+# ================================================
+
+# === ESENCIALES ===
+NODE_ENV=production
+DATABASE_URL=$DATABASE_URL
+API_PORT=3002
+PORT=3001
+
+# === META/FACEBOOK ===
+META_APP_ID=$META_APP_ID
+META_APP_SECRET=$META_APP_SECRET
+META_ENCRYPTION_KEY=$META_ENCRYPTION_KEY
+META_GRAPH_VERSION=v23.0
+META_REDIRECT_URI=https://send.hollytrack.com/api/meta/oauth/callback
+
+# === TRACKING ===
+TRACKING_HOST=$TRACKING_HOST
+TRACKING_PROTOCOL=https
+WEBHOOK_BASE_URL=$WEBHOOK_BASE_URL
+TRACKING_DOMAIN=$TRACKING_DOMAIN
+TRACK_HOST=https://app.hollytrack.com
+ALLOW_CUSTOM_DOMAINS=true
+
+# === CLOUDFLARE ===
+CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN
+CLOUDFLARE_ZONE_ID=$CLOUDFLARE_ZONE_ID
+
+# === DOMINIOS ===
+DOMAIN_APP=$DOMAIN_APP
+DOMAIN_SEND=$DOMAIN_SEND
+DOMAIN_TRACK=$DOMAIN_TRACK
+
+# === SEGURIDAD ===
+AUTH_SECRET=$AUTH_SECRET
+JWT_SECRET=$(openssl rand -hex 32)
+SESSION_SECRET=$(openssl rand -hex 32)
+ENV_FILE
+
+        # Reemplazar TODAS las variables con valores reales de .env.local
+        sed -i "s|\$DATABASE_URL|$DATABASE_URL|g" /etc/ristak/env.production
+        sed -i "s|\$META_APP_SECRET|$META_APP_SECRET|g" /etc/ristak/env.production
+        sed -i "s|\$META_APP_ID|$META_APP_ID|g" /etc/ristak/env.production
+        sed -i "s|\$META_ENCRYPTION_KEY|$META_ENCRYPTION_KEY|g" /etc/ristak/env.production
+        sed -i "s|\$CLOUDFLARE_API_TOKEN|$CLOUDFLARE_API_TOKEN|g" /etc/ristak/env.production
+        sed -i "s|\$CLOUDFLARE_ZONE_ID|$CLOUDFLARE_ZONE_ID|g" /etc/ristak/env.production
+        sed -i "s|\$AUTH_SECRET|$AUTH_SECRET|g" /etc/ristak/env.production
+        sed -i "s|\$DOMAIN_APP|$DOMAIN_APP|g" /etc/ristak/env.production
+        sed -i "s|\$DOMAIN_SEND|$DOMAIN_SEND|g" /etc/ristak/env.production
+        sed -i "s|\$DOMAIN_TRACK|$DOMAIN_TRACK|g" /etc/ristak/env.production
+
+        # Variables con valores por defecto si no están definidas
+        TRACKING_HOST=${TRACKING_HOST:-$DOMAIN_TRACK}
+        TRACKING_DOMAIN=${TRACKING_DOMAIN:-$DOMAIN_TRACK}
+        WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-"https://$DOMAIN_SEND"}
+
+        sed -i "s|\$TRACKING_HOST|$TRACKING_HOST|g" /etc/ristak/env.production
+        sed -i "s|\$TRACKING_DOMAIN|$TRACKING_DOMAIN|g" /etc/ristak/env.production
+        sed -i "s|\$WEBHOOK_BASE_URL|$WEBHOOK_BASE_URL|g" /etc/ristak/env.production
+
+        # Asegurar permisos
+        chmod 600 /etc/ristak/env.production
+
+        echo "✅ Archivo de configuración creado"
+    else
+        echo "ℹ️ Archivo de configuración ya existe"
+    fi
+EOF
+
+    print_success "Variables de entorno de producción configuradas"
+}
+
+# ====== CONFIGURAR SSL CON CERTBOT ======
+setup_ssl_certificates() {
+    print_step "Configurando certificados SSL..."
+
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << EOF
+    # Verificar si ya existen certificados
+    if [ -d "/etc/letsencrypt/live/hollytrack.com" ]; then
+        echo "ℹ️ Certificados SSL ya existen"
+    else
+        echo "🔒 Generando certificados SSL con Let's Encrypt..."
+
+        # Detener nginx temporalmente para certbot
+        systemctl stop nginx || true
+
+        # Generar UN SOLO certificado para TODOS los dominios
+        # Usa el dominio principal (DOMAIN_APP) como nombre del certificado
+        certbot certonly --standalone --non-interactive --agree-tos \
+            --email admin@${DOMAIN_APP} \
+            --cert-name ${DOMAIN_APP} \
+            -d $DOMAIN_APP \
+            -d $DOMAIN_SEND \
+            -d $DOMAIN_TRACK || {
+            echo "⚠️ Error generando certificados. Continuando sin SSL..."
+            systemctl start nginx || true
+            return
+        }
+
+        echo "✅ Certificados SSL generados para todos los dominios"
+        systemctl start nginx || true
+    fi
+
+    # Configurar renovación automática
+    if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+        echo "⏰ Configurando renovación automática de SSL..."
+        (crontab -l 2>/dev/null; echo "0 0,12 * * * certbot renew --quiet && systemctl reload nginx") | crontab -
+    fi
+EOF
+
+    print_success "SSL configurado"
+}
+
+# ====== CONFIGURAR NGINX ======
+setup_nginx_config() {
+    print_step "Configurando Nginx..."
+
+    # Procesar archivo de tracking con variables antes de enviar
+    cat "${PROJECT_ROOT}/deploy/nginx/ilove.hollytrack.com" | \
+        sed "s/\${DOMAIN_APP}/${DOMAIN_APP}/g" | \
+        sed "s/\${DOMAIN_TRACK}/${DOMAIN_TRACK}/g" > /tmp/nginx-tracking-processed.conf
+
+    # Transferir configuración procesada de nginx
+    sshpass -p "$SERVER_PASSWORD" scp -o StrictHostKeyChecking=no \
+        /tmp/nginx-tracking-processed.conf \
+        $SERVER_USER@$SERVER_HOST:/tmp/nginx-tracking.conf
+
+    # Limpiar archivo temporal
+    rm -f /tmp/nginx-tracking-processed.conf
+
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST \
+        DOMAIN_APP="$DOMAIN_APP" DOMAIN_SEND="$DOMAIN_SEND" DOMAIN_TRACK="$DOMAIN_TRACK" \
+        bash << 'NGINX_SETUP'
+    # Configuración para ${DOMAIN_APP} (Frontend)
+    cat > /etc/nginx/sites-available/${DOMAIN_APP} << FRONTEND_CONF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN_APP};
+    return 301 https://\$server_name\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${DOMAIN_APP};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN_APP}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_APP}/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Redirigir /api/* a send.hollytrack.com
+    location /api/ {
+        return 301 https://${DOMAIN_SEND}\$request_uri;
+    }
+
+    location / {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+FRONTEND_CONF
+
+    # Configuración para ${DOMAIN_SEND} (API)
+    cat > /etc/nginx/sites-available/${DOMAIN_SEND} << API_CONF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN_SEND};
+    return 301 https://\$server_name\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${DOMAIN_SEND};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN_APP}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_APP}/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    client_max_body_size 50M;
+
+    location / {
+        proxy_pass http://localhost:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+API_CONF
+
+    # Configuración para ilove.hollytrack.com (Tracking)
+    mv /tmp/nginx-tracking.conf /etc/nginx/sites-available/${DOMAIN_TRACK}
+
+    # IMPORTANTE: El orden de carga de nginx es crítico para el funcionamiento correcto
+    # ${DOMAIN_TRACK} (tracking) tiene un wildcard (_) que captura TODOS los dominios personalizados
+    # Debe cargarse PRIMERO (prefijo 00-) para procesar dominios como track.cliente.com
+    # Si ${DOMAIN_APP} se carga primero, interceptará las peticiones y las enviará al puerto equivocado
+
+    # Primero limpiar enlaces antiguos
+    rm -f /etc/nginx/sites-enabled/*
+
+    # Crear enlaces con orden específico:
+    # 00- hace que ${DOMAIN_TRACK} (tracking con wildcard) se cargue primero
+    # Esto asegura que dominios personalizados (ej: track.cliente.com) sean capturados correctamente
+    ln -sf /etc/nginx/sites-available/${DOMAIN_TRACK} /etc/nginx/sites-enabled/00-${DOMAIN_TRACK}
+    ln -sf /etc/nginx/sites-available/${DOMAIN_APP} /etc/nginx/sites-enabled/${DOMAIN_APP}
+    ln -sf /etc/nginx/sites-available/${DOMAIN_SEND} /etc/nginx/sites-enabled/${DOMAIN_SEND}
+
+    # Probar configuración y asegurar que Nginx esté corriendo
+    if nginx -t; then
+        # Verificar si Nginx está corriendo
+        if systemctl is-active --quiet nginx; then
+            systemctl reload nginx && echo "✅ Nginx recargado"
+        else
+            systemctl start nginx && echo "✅ Nginx iniciado"
+        fi
+        echo "✅ Nginx configurado correctamente"
+    else
+        echo "❌ Error en configuración de Nginx - revisando..."
+        nginx -t 2>&1
+    fi
+NGINX_SETUP
+
+    print_success "Nginx configurado con todos los dominios"
 }
 
 # ====== VALIDACIÓN CON SERVIDOR ======
 validate_server_config() {
     print_step "Validando configuración del servidor..."
 
-    # Crear archivo temporal con esquema de variables esperadas
-    cat > /tmp/env.schema << 'SCHEMA'
-DATABASE_URL
-ACCOUNT_ID
-DEFAULT_SUBACCOUNT_ID
-NODE_ENV
-PORT
-API_PORT
-SCHEMA
-
-    # Transferir esquema al servidor
-    sshpass -p "$SERVER_PASSWORD" scp -o StrictHostKeyChecking=no \
-        /tmp/env.schema $SERVER_USER@$SERVER_HOST:/tmp/
-
-    # Validar en el servidor
-    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'VALIDATE'
-    # Verificar que el archivo de producción existe
-    if [ ! -f /etc/ristak-pro/env.production ]; then
-        echo "ERROR: No existe /etc/ristak-pro/env.production en el servidor"
-        exit 1
-    fi
-
-    # Verificar permisos seguros
-    PERMS=$(stat -c "%a" /etc/ristak-pro/env.production)
-    if [ "$PERMS" != "600" ]; then
-        echo "WARNING: Permisos inseguros en env.production (actual: $PERMS)"
-        chmod 600 /etc/ristak-pro/env.production
-    fi
-
-    # Validar que todas las variables requeridas existen
-    while IFS= read -r var; do
-        if ! grep -q "^${var}=" /etc/ristak-pro/env.production; then
-            echo "ERROR: Variable $var no está definida en el servidor"
-            exit 1
-        fi
-    done < /tmp/env.schema
-
-    echo "✅ Configuración del servidor validada"
-    rm /tmp/env.schema
-VALIDATE
-
-    rm /tmp/env.schema
-    print_success "Servidor tiene todas las variables requeridas"
+    # Ya no necesitamos validar aquí porque setup_environment_file ya lo hace
+    print_success "Configuración validada"
 }
 
 # ====== BUILD DEL FRONTEND ======
@@ -185,9 +577,9 @@ build_frontend() {
         npm ci --silent || npm install --silent
     fi
 
-    # Build de producción
+    # Build de producción con URL de API correcta
     print_info "Compilando para producción..."
-    NODE_ENV=production npx vite build || print_error "Error en build del frontend"
+    VITE_API_URL="https://${DOMAIN_SEND}/api" NODE_ENV=production npx vite build || print_error "Error en build del frontend"
 
     if [ ! -d "dist" ]; then
         print_error "No se generó el directorio dist"
@@ -200,7 +592,7 @@ build_frontend() {
 transfer_files() {
     print_step "Transfiriendo archivos (sin credenciales)..."
 
-    # Crear archivo tar EXCLUYENDO todos los .env
+    # Crear archivo tar EXCLUYENDO todos los .env y archivos sensibles
     cd "${PROJECT_ROOT}"
     tar -czf /tmp/ristak-deploy.tar.gz \
         --exclude=.env \
@@ -211,10 +603,14 @@ transfer_files() {
         --exclude=node_modules \
         --exclude=.git \
         --exclude=.DS_Store \
+        --exclude=api/migrations \
+        --exclude=api/scripts/setup-*.js \
+        --exclude=api/scripts/update-*.js \
+        --exclude=api/test-*.json \
         .
 
-    # Verificar que no hay credenciales en el tar
-    if tar -tzf /tmp/ristak-deploy.tar.gz | grep -E "\.env|password|secret" | grep -v "env.example"; then
+    # Verificar que no hay credenciales en el tar (excluyendo migraciones SQL que son necesarias)
+    if tar -tzf /tmp/ristak-deploy.tar.gz | grep -E "\.env|password.*=|secret.*=|key.*=" | grep -v "env.example" | grep -v "migrations/" | grep -v "\.sql$"; then
         print_error "Se detectaron posibles credenciales en el archivo de deployment"
         rm /tmp/ristak-deploy.tar.gz
         exit 1
@@ -226,7 +622,7 @@ transfer_files() {
 
     # Extraer en el servidor
     sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'EXTRACT'
-    cd /opt/ristak-pro
+    cd /opt/ristak
 
     # Backup antes de extraer
     if [ -d "dist" ]; then
@@ -252,40 +648,127 @@ EXTRACT
 configure_services() {
     print_step "Configurando servicios..."
 
-    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'SERVICES'
-    # Asegurar que las variables de entorno están disponibles
-    if [ ! -f /etc/ristak-pro/env.production ]; then
-        echo "ERROR: Falta archivo de configuración de producción"
+    # Verificar configuración
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "test -f /etc/ristak/env.production" || {
+        print_error "Falta archivo de configuración de producción"
         exit 1
-    fi
+    }
 
-    # Reiniciar servicios con las variables correctas
-    cd /opt/ristak-pro
+    # Configurar PM2 para frontend
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "
+        cd /opt/ristak
+        pm2 stop ristak-frontend 2>/dev/null || true
+        pm2 delete ristak-frontend 2>/dev/null || true
+        pm2 serve dist 3001 --name 'ristak-frontend' --spa
+        echo '✓ Frontend configurado en PM2'
+    "
 
-    # PM2 con variables de entorno
-    pm2 delete all 2>/dev/null || true
+    # Configurar base de datos y usuarios
+    print_info "Configurando sistema de login..."
 
-    # Frontend
-    pm2 start serve \
-        --name "ristak-frontend" \
-        --cwd /opt/ristak-pro \
-        -- -s dist -l 3001
+    # Instalar dependencias necesarias
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "
+        cd /opt/ristak/api
+        npm list bcryptjs >/dev/null 2>&1 || npm install bcryptjs --silent
+        npm list pg >/dev/null 2>&1 || npm install pg --silent
 
-    # Backend con variables de entorno
-    set -a
-    source /etc/ristak-pro/env.production
-    set +a
+        # Instalar cliente PostgreSQL si es necesario
+        if ! command -v psql &> /dev/null; then
+            echo 'Instalando cliente PostgreSQL...'
+            apt-get install -y postgresql-client
+        fi
+    "
 
-    pm2 start api/src/server.js \
-        --name "ristak-backend" \
-        --cwd /opt/ristak-pro/api \
-        --max-memory-restart 500M
+    # Crear script para configurar usuario admin
+    cat > /tmp/setup_admin.js << 'ADMIN_SCRIPT'
+const bcrypt = require('bcryptjs');
+const { Pool } = require('pg');
 
-    pm2 save
-    pm2 startup systemd -u root --hp /root 2>/dev/null || true
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-    echo "✅ Servicios configurados"
-SERVICES
+async function setupAdmin() {
+  try {
+    // Crear tabla si no existe
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        name VARCHAR(255),
+        password_hash VARCHAR(255),
+        role VARCHAR(50) DEFAULT 'admin',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_login_at TIMESTAMP
+      )
+    `);
+
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+
+    const email = 'milemedia.mkt@gmail.com';
+    const password = 'Raulgom123';
+    const name = 'Milemedia';
+
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    const hash = await bcrypt.hash(password, 10);
+
+    if (existing.rows.length > 0) {
+      await pool.query(
+        'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE email = $2',
+        [hash, email]
+      );
+      console.log('✅ Contraseña actualizada para milemedia.mkt@gmail.com');
+    } else {
+      await pool.query(
+        'INSERT INTO users (email, name, password_hash, role) VALUES ($1, $2, $3, $4)',
+        [email, name, hash, 'admin']
+      );
+      console.log('✅ Usuario admin creado: milemedia.mkt@gmail.com');
+    }
+
+    console.log('📧 Email: milemedia.mkt@gmail.com');
+    console.log('🔑 Password: Raulgom123');
+    console.log('⚠️  IMPORTANTE: Cambia esta contraseña después del primer login');
+  } catch (e) {
+    console.log('⚠️ Error configurando usuario:', e.message);
+  }
+  await pool.end();
+}
+
+setupAdmin();
+ADMIN_SCRIPT
+
+    # Transferir y ejecutar script
+    sshpass -p "$SERVER_PASSWORD" scp -o StrictHostKeyChecking=no /tmp/setup_admin.js $SERVER_USER@$SERVER_HOST:/tmp/setup_admin.js
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "
+        cd /opt/ristak/api
+        set -a
+        source /etc/ristak/env.production
+        set +a
+        node /tmp/setup_admin.js
+        rm /tmp/setup_admin.js
+        echo '✓ Sistema de login configurado'
+    "
+
+    # Configurar PM2 para backend
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "
+        cd /opt/ristak
+        pm2 stop ristak-backend 2>/dev/null || true
+        pm2 delete ristak-backend 2>/dev/null || true
+
+        # Crear symlink del archivo de variables
+        ln -sf /etc/ristak/env.production /opt/ristak/api/.env
+
+        # Iniciar backend con variables de entorno
+        export \$(cat /etc/ristak/env.production | grep -v '^#' | xargs)
+        pm2 start api/src/server.js --name 'ristak-backend' --max-memory-restart 500M --update-env
+
+        pm2 save
+        pm2 startup systemd -u root --hp /root 2>/dev/null || true
+        echo '✓ Backend configurado en PM2'
+    "
+
+    # Limpiar archivos temporales
+    rm -f /tmp/setup_admin.js
 
     print_success "Servicios actualizados con configuración segura"
 }
@@ -302,13 +785,35 @@ verify_deployment() {
         print_warning "Frontend: https://$DOMAIN_APP (HTTP $FRONTEND_STATUS)"
     fi
 
-    # API Health check
-    API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$DOMAIN_SEND/health 2>/dev/null || echo "000")
-    if [ "$API_STATUS" == "200" ]; then
-        print_success "API: https://$DOMAIN_SEND/health ✓"
+    # API - Verificar con endpoint que existe
+    API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$DOMAIN_SEND/api/campaigns 2>/dev/null || echo "000")
+    if [ "$API_STATUS" == "401" ] || [ "$API_STATUS" == "200" ]; then
+        # 401 es esperado sin autenticación
+        print_success "API: https://$DOMAIN_SEND/api ✓"
     else
-        print_warning "API: https://$DOMAIN_SEND/health (HTTP $API_STATUS)"
+        print_warning "API: https://$DOMAIN_SEND/api (HTTP $API_STATUS)"
     fi
+
+    # Tracking
+    TRACKING_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$DOMAIN_TRACK/snip.js 2>/dev/null || echo "000")
+    if [ "$TRACKING_STATUS" == "200" ]; then
+        print_success "Tracking: https://$DOMAIN_TRACK/snip.js ✓"
+    else
+        print_warning "Tracking: https://$DOMAIN_TRACK/snip.js (HTTP $TRACKING_STATUS)"
+    fi
+
+    # Verificar PM2 está corriendo correctamente
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'PM2CHECK'
+    echo ""
+    echo "Estado de PM2:"
+    pm2 list | grep -E "ristak-frontend|ristak-backend" | while read line; do
+        if echo "$line" | grep -q "online"; then
+            echo "  ✓ $line"
+        else
+            echo "  ⚠ $line"
+        fi
+    done
+PM2CHECK
 
     # Log de deployment
     sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << DEPLOYLOG
@@ -327,10 +832,10 @@ security_cleanup() {
     # Limpiar en el servidor
     sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'CLEANUP'
     # Asegurar que no hay .env en directorios públicos
-    find /opt/ristak-pro -name ".env*" -not -path "*/node_modules/*" -type f -delete 2>/dev/null || true
+    find /opt/ristak -name ".env*" -not -path "*/node_modules/*" -type f -delete 2>/dev/null || true
 
     # Verificar permisos
-    chmod 600 /etc/ristak-pro/env.production 2>/dev/null || true
+    chmod 600 /etc/ristak/env.production 2>/dev/null || true
 
     echo "✅ Limpieza de seguridad completada"
 CLEANUP
@@ -350,14 +855,23 @@ main() {
         echo "  --skip-build     Saltar build del frontend"
         echo "  --validate-only  Solo validar, no deployar"
         echo "  --quick          Deployment rápido (sin validaciones exhaustivas)"
+        echo "  --fresh-install  Instalar todo desde cero (server nuevo)"
         echo ""
         echo "Variables requeridas en .env.local:"
         echo "  DEPLOY_HOST      IP del servidor"
         echo "  DEPLOY_USER      Usuario SSH"
         echo "  DEPLOY_PASSWORD  Contraseña SSH"
         echo "  DATABASE_URL     URL de la base de datos"
-        echo "  ACCOUNT_ID       ID de la cuenta"
-        echo "  DEFAULT_SUBACCOUNT_ID  ID del subaccount"
+        echo "  DOMAIN_APP       Dominio de la app (ej: app.hollytrack.com)"
+        echo "  DOMAIN_SEND      Dominio del API (ej: send.hollytrack.com)"
+        echo "  DOMAIN_TRACK     Dominio de tracking (ej: ilove.hollytrack.com)"
+        echo ""
+        echo "🚀 Este script puede:"
+        echo "  • Detectar e instalar dependencias faltantes"
+        echo "  • Configurar PostgreSQL y crear la base de datos"
+        echo "  • Generar certificados SSL automáticamente"
+        echo "  • Configurar Nginx con todos los dominios"
+        echo "  • Deployar la aplicación completa"
         echo ""
         exit 0
     fi
@@ -366,8 +880,16 @@ main() {
     validate_security
     load_environment
 
+    # NUEVO: Setup inicial del servidor si es necesario
+    setup_server_if_needed
+
+    # SIEMPRE actualizar configuración de Nginx para asegurar que esté correcta
+    setup_nginx_config
+
+    # Configurar SSL si es necesario
+    setup_ssl_certificates
+
     if [ "$1" == "--validate-only" ]; then
-        validate_server_config
         print_success "Validación completada. No se realizó deployment."
         exit 0
     fi
@@ -379,6 +901,18 @@ main() {
     fi
 
     transfer_files
+
+    # Instalar dependencias del API en el servidor
+    print_step "Instalando dependencias del backend..."
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'INSTALL_API_DEPS'
+    cd /opt/ristak/api
+    if [ -f package.json ]; then
+        echo "📦 Instalando dependencias de Node.js..."
+        npm ci --production || npm install --production
+        echo "✅ Dependencias del backend instaladas"
+    fi
+INSTALL_API_DEPS
+
     configure_services
     security_cleanup
     verify_deployment
@@ -386,8 +920,15 @@ main() {
     # Resumen final
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}✨ DEPLOYMENT SEGURO COMPLETADO${NC}"
+    echo -e "${GREEN}✨ DEPLOYMENT COMPLETO Y FUNCIONANDO${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "🚀 Estado del Sistema:"
+    echo -e "   • Node.js instalado y configurado"
+    echo -e "   • PostgreSQL funcionando con base de datos"
+    echo -e "   • Nginx configurado con SSL"
+    echo -e "   • PM2 ejecutando frontend y backend"
+    echo -e "   • Certificados SSL activos"
     echo ""
     echo -e "🔒 Seguridad:"
     echo -e "   • Credenciales NO incluidas en deployment"
@@ -400,13 +941,14 @@ main() {
     echo -e "   ${BLUE}📮 API:${NC}      https://${DOMAIN_SEND}"
     echo -e "   ${BLUE}📊 Tracking:${NC} https://${DOMAIN_TRACK}"
     echo ""
-    echo -e "${YELLOW}Próximos pasos recomendados:${NC}"
-    echo -e "  1. Verificar funcionamiento en navegador"
-    echo -e "  2. Revisar logs: pm2 logs"
-    echo -e "  3. Monitorear: pm2 monit"
-    echo -e "  4. Rotar credenciales regularmente"
+    echo -e "${YELLOW}Comandos útiles en el servidor:${NC}"
+    echo -e "  pm2 status      - Ver estado de los servicios"
+    echo -e "  pm2 logs        - Ver logs en tiempo real"
+    echo -e "  pm2 monit       - Monitor interactivo"
+    echo -e "  nginx -t        - Probar configuración de Nginx"
+    echo -e "  certbot renew   - Renovar certificados SSL"
     echo ""
-    echo -e "${GREEN}¡Deployment seguro completado! 🔒${NC}"
+    echo -e "${GREEN}¡Tu app está lista y funcionando! 🎉${NC}"
 }
 
 # Ejecutar

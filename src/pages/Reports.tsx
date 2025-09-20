@@ -3,12 +3,12 @@ import { PageContainer, TableWithControls, Badge, Button, KPICard, TabList, Moda
 import { SkeletonLoader } from '../ui/SkeletonLoader'
 import { useColumnsConfig } from '../hooks/useColumnsConfig'
 import { Icons } from '../icons'
-import { formatCurrency, formatNumber, formatDate } from '../lib/utils'
-import { cn } from '../lib/utils'
+import { formatCurrency, formatNumber, formatDate, cn } from '../lib/utils'
+import { dateToApiString, formatDateLong, formatDateShort, subtractDays, subtractMonths, getCurrentYear, startOfYear, getLastDayOfMonth, formatYear, formatMonthYear, createDateInTimezone } from '../lib/dateUtils'
 import { MetricsTables } from '../modules/reports/MetricsTables'
 import { DateRangeSelector } from '../modules/reports/DateRangeSelector'
 import { ReportsModals } from '../modules/reports/ReportsModals'
-import { getApiUrl } from '../config/api'
+import { getApiUrl, fetchWithAuth } from '../config/api'
 
 
 interface MetricsData {
@@ -29,6 +29,7 @@ interface MetricsData {
   sales: number
   cac: number | null
   revenue: number
+  new_customers?: number // Campo opcional para nuevos clientes
 }
 
 type ViewType = 'day' | 'month' | 'year'
@@ -50,16 +51,16 @@ export function Reports() {
   const [selectedPeriod, setSelectedPeriod] = useState<{ start: string, end: string } | null>(null)
   const [modalType, setModalType] = useState<'sales' | 'leads' | 'appointments' | 'new_customers' | null>(null)
   const [dateRange, setDateRange] = useState({
-    start: new Date(new Date().setDate(new Date().getDate() - 30)),
-    end: new Date()
+    start: subtractDays(createDateInTimezone(), 30),
+    end: createDateInTimezone()
   })
   const [monthRange, setMonthRange] = useState<'last12' | 'thisYear' | 'custom'>('last12')
-  const [customMonthYear, setCustomMonthYear] = useState(new Date().getFullYear())
+  const [customMonthYear, setCustomMonthYear] = useState(getCurrentYear())
   const [customMonthStart, setCustomMonthStart] = useState(0)
   const [customMonthEnd, setCustomMonthEnd] = useState(11)
   const [yearRange, setYearRange] = useState({
-    start: new Date().getFullYear() - 2,
-    end: new Date().getFullYear()
+    start: getCurrentYear() - 2,
+    end: getCurrentYear()
   })
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null)
@@ -71,13 +72,44 @@ export function Reports() {
     fetchMetrics()
   }, [viewType, reportType, monthRange, yearRange, dateRange, customMonthYear, customMonthStart, customMonthEnd])
 
+  // Helper para obtener el rango de fechas según la vista
+  const getDateRangeForAPI = () => {
+    let startDate: Date
+    let endDate: Date
+
+    if (viewType === 'day') {
+      startDate = dateRange.start
+      endDate = dateRange.end
+    } else if (viewType === 'month') {
+      endDate = createDateInTimezone()
+
+      if (monthRange === 'last12') {
+        startDate = subtractMonths(createDateInTimezone(), 12)
+        startDate.setDate(1)
+      } else if (monthRange === 'thisYear') {
+        startDate = startOfYear()
+      } else {
+        startDate = createDateInTimezone(customMonthYear, customMonthStart, 1, 0, 0)
+        endDate = createDateInTimezone(customMonthYear, customMonthEnd + 1, 0, 23, 59)
+      }
+    } else {
+      startDate = createDateInTimezone(yearRange.start, 0, 1, 0, 0)
+      endDate = createDateInTimezone(yearRange.end, 11, 31, 23, 59)
+    }
+
+    return {
+      start: dateToApiString(startDate),
+      end: dateToApiString(endDate)
+    }
+  }
+
   // Fetch summary metrics with trends
   useEffect(() => {
     async function fetchSummaryMetrics() {
       try {
         setMetricsLoading(true)
         const { start, end } = getDateRangeForAPI()
-        const response = await fetch(
+        const response = await fetchWithAuth(
           getApiUrl(`/reports/summary-metrics?start=${start}&end=${end}`)
         )
         if (response.ok) {
@@ -97,7 +129,7 @@ export function Reports() {
     let timer: any
     const poll = async () => {
       try {
-        const r = await fetch(getApiUrl('/meta/sync/status'))
+        const r = await fetchWithAuth(getApiUrl('/meta/sync/status'))
         const j = await r.json()
         setSyncRunning(Boolean(j?.data?.running))
       } catch {}
@@ -116,33 +148,32 @@ export function Reports() {
       
       if (viewType === 'day') {
         // Para vista de día, usar el rango de fecha seleccionado
-        startDate = new Date(dateRange.start)
-        endDate = new Date(dateRange.end)
+        startDate = dateRange.start
+        endDate = dateRange.end
       } else if (viewType === 'month') {
-        endDate = new Date() // Hoy
+        endDate = createDateInTimezone() // Hoy
         
         if (monthRange === 'last12') {
           // Últimos 12 meses completos
-          startDate = new Date()
-          startDate.setMonth(startDate.getMonth() - 12)
+          startDate = subtractMonths(createDateInTimezone(), 12)
           startDate.setDate(1) // Primer día del mes
         } else if (monthRange === 'thisYear') {
           // Todo el año actual
-          startDate = new Date(new Date().getFullYear(), 0, 1) // 1 de enero
+          startDate = startOfYear() // 1 de enero
         } else {
           // Rango personalizado de meses
-          startDate = new Date(customMonthYear, customMonthStart, 1)
-          endDate = new Date(customMonthYear, customMonthEnd + 1, 0) // Último día del mes final
+          startDate = createDateInTimezone(customMonthYear, customMonthStart, 1, 0, 0)
+          endDate = createDateInTimezone(customMonthYear, customMonthEnd + 1, 0, 23, 59) // Último día del mes final
         }
       } else {
         // Vista de año
-        startDate = new Date(yearRange.start, 0, 1) // 1 de enero del año inicial
-        endDate = new Date(yearRange.end, 11, 31) // 31 de diciembre del año final
+        startDate = createDateInTimezone(yearRange.start, 0, 1, 0, 0) // 1 de enero del año inicial
+        endDate = createDateInTimezone(yearRange.end, 11, 31, 23, 59) // 31 de diciembre del año final
       }
       
       const params = new URLSearchParams({
-        start: startDate.toISOString(),
-        end: endDate.toISOString(),
+        start: dateToApiString(startDate),
+        end: dateToApiString(endDate),
         groupBy: groupByForView(viewType)
       })
       
@@ -152,7 +183,7 @@ export function Reports() {
       }
       
       
-      const res = await fetch(getApiUrl(`/reports/metrics?${params.toString()}`))
+      const res = await fetchWithAuth(getApiUrl(`/reports/metrics?${params.toString()}`))
       if (!res.ok) throw new Error('Failed to load report metrics')
       const json = await res.json()
       
@@ -428,7 +459,7 @@ export function Reports() {
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
   ]
 
-  const currentYear = new Date().getFullYear()
+  const currentYear = getCurrentYear()
   const years = Array.from({ length: 5 }, (_, i) => currentYear - i)
 
   // Obtener fechas de inicio y fin del período
@@ -446,7 +477,7 @@ export function Reports() {
       const [year, month] = date.split('-')
       start = `${year}-${month}-01`
       // Obtener el último día del mes
-      const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate()
+      const lastDay = getLastDayOfMonth(parseInt(year), parseInt(month) - 1)
       end = `${year}-${month}-${String(lastDay).padStart(2, '0')}`
     } else {
       // Para día: YYYY-MM-DD
@@ -471,15 +502,11 @@ export function Reports() {
     const d = new Date(date)
     
     if (viewType === 'year') {
-      return d.getFullYear().toString()
+      return formatYear(d)
     } else if (viewType === 'month') {
-      const monthName = months[d.getMonth()]
-      return `${monthName} ${d.getFullYear()}`
+      return formatMonthYear(d)
     } else {
-      const day = d.getDate()
-      const monthName = months[d.getMonth()].toLowerCase()
-      const year = d.getFullYear()
-      return `${day} de ${monthName} de ${year}`
+      return formatDateLong(d)
     }
   }
 
@@ -508,7 +535,7 @@ export function Reports() {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `reporte-${reportType}-${viewType}-${new Date().toISOString().split('T')[0]}.csv`
+    a.download = `reporte-${reportType}-${viewType}-${dateToApiString(createDateInTimezone())}.csv`
     a.click()
   }
 

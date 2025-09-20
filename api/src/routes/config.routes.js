@@ -2,39 +2,35 @@ const express = require('express');
 const router = express.Router();
 const { databasePool } = require('../config/database.config');
 
-// Endpoint para obtener la configuración de cuenta/subcuenta
+// Endpoint para obtener la configuración general de la cuenta (modo single tenant)
 router.get('/account-config', async (req, res) => {
   try {
-    // Primero intentar obtener desde la base de datos
-    const subaccountId = process.env.DEFAULT_SUBACCOUNT_ID || 'suba_default';
-    
-    const query = `
-      SELECT account_id, subaccount_id 
-      FROM public.subaccount 
-      WHERE subaccount_id = $1
-      LIMIT 1
-    `;
-    
-    const result = await databasePool.query(query, [subaccountId]);
-    
-    let accountId;
-    let finalSubaccountId = subaccountId;
-    
-    if (result.rows.length > 0) {
-      // Si encontramos en la DB, usar esos valores
-      accountId = result.rows[0].account_id;
-      finalSubaccountId = result.rows[0].subaccount_id;
-    } else {
-      // Si no hay en DB, usar variables de entorno
-      accountId = process.env.ACCOUNT_ID || 'acc_default';
-    }
-    
+    // Configurar valores por defecto para modo single tenant
+    let accountId = 'default-account';
+
+    const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || 'https://send.hollytrack.com';
+    const trackingHost = process.env.TRACKING_HOST || 'ilove.hollytrack.com';
+    const trackingProtocol = process.env.TRACKING_PROTOCOL || 'https';
+    const trackingSnippetUrl = `${trackingProtocol}://${trackingHost}/snip.js`;
+
     res.json({
       success: true,
       data: {
-        account_id: accountId,
-        subaccount_id: finalSubaccountId,
-        webhook_base_url: 'https://send.hollytrack.com'
+        webhook_base_url: webhookBaseUrl,
+        webhook_endpoints: {
+          contacts: `${webhookBaseUrl}/webhook/contacts`,
+          appointments: `${webhookBaseUrl}/webhook/appointments`,
+          payments: `${webhookBaseUrl}/webhook/payments`,
+          refunds: `${webhookBaseUrl}/webhook/refunds`
+        },
+        tracking: {
+          host: trackingHost,
+          snippet_url: trackingSnippetUrl,
+          snippet_code: `<!-- HollyTrack Analytics -->\n<script defer src="${trackingSnippetUrl}"></script>\n<!-- End HollyTrack Analytics -->`
+        },
+        account: {
+          id: accountId
+        }
       }
     });
   } catch (error) {

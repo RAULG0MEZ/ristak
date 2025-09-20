@@ -6,6 +6,7 @@ import { useColumnsConfig } from '../hooks/useColumnsConfig'
 import { useToastActions } from '../hooks/useToast'
 import { Icons } from '../icons'
 import { formatCurrency, formatDate, formatNumber } from '../lib/utils'
+import { dateToApiString, createDateInTimezone } from '../lib/dateUtils'
 import { ContactSearch } from '../components/ContactSearch'
 
 export function Payments() {
@@ -46,7 +47,7 @@ export function Payments() {
   const [createForm, setCreateForm] = useState<any>({
     contactId: '',
     amount: '',
-    date: new Date().toISOString().split('T')[0],
+    date: dateToApiString(createDateInTimezone()),
     description: '',
     paymentMethod: 'card',
     status: 'completed'
@@ -230,7 +231,7 @@ export function Payments() {
               setCreateForm({
                 contactId: '',
                 amount: '',
-                date: new Date().toISOString().split('T')[0],
+                date: dateToApiString(createDateInTimezone()),
                 description: '',
                 paymentMethod: 'card',
                 status: 'completed'
@@ -368,10 +369,7 @@ export function Payments() {
               <p className="text-sm"><span className="text-tertiary">Fecha:</span> {formatDate(deleteModal.payment.date)}</p>
             </div>
           )}
-          <p className="text-error text-sm text-center">
-            Esta acción no se puede deshacer.
-          </p>
-          <div className="flex gap-2 pt-2 justify-center">
+          <div className="flex flex-col items-center gap-3">
             <Button
               variant="danger"
               size="sm"
@@ -391,6 +389,9 @@ export function Payments() {
               <Icons.trash2 className="w-4 h-4 mr-2" />
               Eliminar
             </Button>
+            <p className="text-xs text-tertiary">
+              Esta acción no se puede deshacer
+            </p>
           </div>
         </div>
       </Modal>

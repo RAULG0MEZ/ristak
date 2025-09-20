@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Modal, Badge, TableWithControls } from '../../ui'
 import { Icons } from '../../icons'
 import { formatCurrency, formatDate, cn } from '../../lib/utils'
-import { getApiUrl } from '../../config/api'
+import { getApiUrl, fetchWithAuth } from '../../config/api'
 
 interface Contact {
   contact_id: string
@@ -86,7 +86,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
         ? `/reports/sales/attributed?start=${periodStart}&end=${periodEnd}`
         : `/reports/sales?start=${periodStart}&end=${periodEnd}`
       
-      const res = await fetch(getApiUrl(endpoint))
+      const res = await fetchWithAuth(getApiUrl(endpoint))
       if (!res.ok) throw new Error('Failed to load sales')
       const data = await res.json()
       setSales(data.data || [])
@@ -107,7 +107,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
         ? `/reports/leads/attributed?start=${periodStart}&end=${periodEnd}`
         : `/reports/leads?start=${periodStart}&end=${periodEnd}`
       
-      const res = await fetch(getApiUrl(endpoint))
+      const res = await fetchWithAuth(getApiUrl(endpoint))
       if (!res.ok) throw new Error('Failed to load leads')
       const data = await res.json()
       setLeads(data.data || [])
@@ -128,7 +128,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
         ? `/reports/appointments/attributed?start=${periodStart}&end=${periodEnd}`
         : `/reports/appointments?start=${periodStart}&end=${periodEnd}`
       
-      const res = await fetch(getApiUrl(endpoint))
+      const res = await fetchWithAuth(getApiUrl(endpoint))
       if (!res.ok) throw new Error('Failed to load appointments')
       const data = await res.json()
       setAppointments(data.data || [])
@@ -149,7 +149,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
         ? `/reports/new-customers/attributed?start=${periodStart}&end=${periodEnd}`
         : `/reports/new-customers?start=${periodStart}&end=${periodEnd}`
       
-      const res = await fetch(getApiUrl(endpoint))
+      const res = await fetchWithAuth(getApiUrl(endpoint))
       if (!res.ok) throw new Error('Failed to load new customers')
       const data = await res.json()
       setNewCustomers(data.data || [])

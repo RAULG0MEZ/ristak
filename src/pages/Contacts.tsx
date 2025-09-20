@@ -457,10 +457,7 @@ export function Contacts() {
               <p className="text-sm"><span className="text-tertiary">Teléfono:</span> {deleteModal.contact.phone || 'Sin teléfono'}</p>
             </div>
           )}
-          <p className="text-error text-sm text-center">
-            Esta acción no se puede deshacer.
-          </p>
-          <div className="flex gap-2 pt-2 justify-center">
+          <div className="flex flex-col items-center gap-3">
             <Button
               variant="danger"
               size="sm"
@@ -480,6 +477,9 @@ export function Contacts() {
               <Icons.trash2 className="w-4 h-4 mr-2" />
               Eliminar
             </Button>
+            <p className="text-xs text-tertiary">
+              Esta acción no se puede deshacer
+            </p>
           </div>
         </div>
       </Modal>
@@ -667,17 +667,7 @@ export function Contacts() {
           <p className="text-secondary text-center">
             ¿Estás seguro que deseas eliminar {selectedContacts.size} contacto{selectedContacts.size !== 1 ? 's' : ''}?
           </p>
-          <p className="text-error text-sm text-center font-medium">
-            Esta acción no se puede deshacer.
-          </p>
-          <div className="flex gap-2 pt-2 justify-center">
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => setBulkDeleteModal({ isOpen: false })}
-            >
-              Cancelar
-            </Button>
+          <div className="flex flex-col items-center gap-3">
             <Button
               variant="danger"
               size="sm"
@@ -700,6 +690,9 @@ export function Contacts() {
               <Icons.trash2 className="w-4 h-4 mr-2" />
               Eliminar {selectedContacts.size} contacto{selectedContacts.size !== 1 ? 's' : ''}
             </Button>
+            <p className="text-xs text-tertiary">
+              Esta acción no se puede deshacer
+            </p>
           </div>
         </div>
       </Modal>

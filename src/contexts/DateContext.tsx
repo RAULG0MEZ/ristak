@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react'
+import { startOfMonthUTC, endOfMonthUTC } from '../lib/dateUtils'
 
 interface DateRange {
   start: Date
@@ -16,27 +17,21 @@ interface DateProviderProps {
   children: ReactNode
 }
 
-// Funciones helper para fechas comunes
-export const startOfMonth = (date: Date): Date => {
-  const result = new Date(date)
-  result.setDate(1)
-  result.setHours(0, 0, 0, 0)
-  return result
-}
-
-export const endOfMonth = (date: Date): Date => {
-  const result = new Date(date)
-  result.setMonth(result.getMonth() + 1, 0)
-  result.setHours(23, 59, 59, 999)
-  return result
-}
+// Re-exportamos las funciones para compatibilidad
+export const startOfMonth = startOfMonthUTC
+export const endOfMonth = endOfMonthUTC
 
 export function DateProvider({ children }: DateProviderProps) {
-  // Inicializar con "Este mes" por defecto
-  const [dateRange, setDateRange] = useState<DateRange>({
-    start: startOfMonth(new Date()),
-    end: endOfMonth(new Date())
+  // Inicializar con "Este mes" como rango predeterminado
+  const now = new Date()
+  const [dateRange, setDateRangeState] = useState<DateRange>({
+    start: startOfMonth(now),
+    end: endOfMonth(now)
   })
+
+  const setDateRange = (newRange: DateRange) => {
+    setDateRangeState(newRange)
+  }
 
   return (
     <DateContext.Provider value={{ dateRange, setDateRange }}>

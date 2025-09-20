@@ -97,7 +97,7 @@ class PaymentsService {
     }
   }
   
-  async updatePayment(id, updateData, accountId, subaccountId) {
+  async updatePayment(id, updateData) {
     try {
       const client = await databasePool.connect();
 
@@ -126,17 +126,16 @@ class PaymentsService {
 
         if (paymentFields.length > 0) {
           paymentFields.push(`updated_at = $${fieldIndex++}`);
-          paymentValues.push(new Date());
+          // Usar ISO string para garantizar UTC
+          paymentValues.push(new Date().toISOString());
           paymentValues.push(id);
 
           const paymentQuery = `
             UPDATE payments
             SET ${paymentFields.join(', ')}
-            WHERE id = $${fieldIndex} AND account_id = $${fieldIndex + 1} AND subaccount_id = $${fieldIndex + 2}
+            WHERE id = $${fieldIndex}
             RETURNING *
           `;
-
-          paymentValues.push(accountId, subaccountId);
           const paymentResult = await client.query(paymentQuery, paymentValues);
           if (paymentResult.rows.length === 0) {
             throw new Error('Payment not found');
@@ -148,9 +147,9 @@ class PaymentsService {
         if (updateData.contactName || updateData.email) {
           // Obtener el contact_id del pago
           const getContactIdQuery = `
-            SELECT contact_id FROM payments WHERE id = $1 AND account_id = $2 AND subaccount_id = $3
+            SELECT contact_id FROM payments WHERE id = $1
           `;
-          const contactIdResult = await client.query(getContactIdQuery, [id, accountId, subaccountId]);
+          const contactIdResult = await client.query(getContactIdQuery, [id]);
 
           if (contactIdResult.rows.length > 0) {
             const contactId = contactIdResult.rows[0].contact_id;
@@ -170,16 +169,15 @@ class PaymentsService {
 
             if (contactFields.length > 0) {
               contactFields.push(`updated_at = $${contactFieldIndex++}`);
-              contactValues.push(new Date());
+              // Usar ISO string para garantizar UTC
+              contactValues.push(new Date().toISOString());
               contactValues.push(contactId);
 
               const contactQuery = `
                 UPDATE contacts
                 SET ${contactFields.join(', ')}
-                WHERE contact_id = $${contactFieldIndex} AND account_id = $${contactFieldIndex + 1} AND subaccount_id = $${contactFieldIndex + 2}
+                WHERE contact_id = $${contactFieldIndex}
               `;
-
-              contactValues.push(accountId, subaccountId);
               await client.query(contactQuery, contactValues);
             }
           }
@@ -207,10 +205,10 @@ class PaymentsService {
             c.company
           FROM payments p
           LEFT JOIN contacts c ON p.contact_id = c.contact_id
-          WHERE p.id = $1 AND p.account_id = $2 AND p.subaccount_id = $3
+          WHERE p.id = $1
         `;
 
-        const finalResult = await client.query(finalQuery, [id, accountId, subaccountId]);
+        const finalResult = await client.query(finalQuery, [id]);
 
         if (finalResult.rows.length === 0) {
           throw new Error('Payment not found');
@@ -253,7 +251,7 @@ class PaymentsService {
     }
   }
 
-  async createPayment(paymentData, accountId, subaccountId) {
+  async createPayment(paymentData) {
     try {
       // Generar IDs únicos
       const paymentId = await this.generatePaymentId();
@@ -269,8 +267,10 @@ class PaymentsService {
       const paymentMethod = paymentData.paymentMethod || 'card';
       const currency = paymentData.currency || 'MXN';
       const description = paymentData.description || 'Pago manual';
-      const paidAt = new Date(paymentData.date);
-      const now = new Date();
+      // Convertir fecha a UTC - el frontend debe enviar en ISO string UTC
+      const paidAt = paymentData.date ? new Date(paymentData.date).toISOString() : new Date().toISOString();
+      // Usar ISO string para garantizar UTC
+      const now = new Date().toISOString();
 
       const insertQuery = `
         INSERT INTO payments (
@@ -285,10 +285,8 @@ class PaymentsService {
           invoice_number,
           paid_at,
           created_at,
-          updated_at,
-          account_id,
-          subaccount_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING *
       `;
 
@@ -304,9 +302,7 @@ class PaymentsService {
         paymentData.invoiceNumber || null,
         paidAt,
         now,
-        now,
-        accountId,
-        subaccountId
+        now
       ]);
 
       // Obtener información del contacto
@@ -347,15 +343,15 @@ class PaymentsService {
   }
 
   
-  async deletePayment(id, accountId, subaccountId) {
+  async deletePayment(id) {
     try {
       const query = `
         DELETE FROM payments
-        WHERE id = $1 AND account_id = $2 AND subaccount_id = $3
+        WHERE id = $1
         RETURNING id
       `;
 
-      const result = await databasePool.query(query, [id, accountId, subaccountId]);
+      const result = await databasePool.query(query, [id]);
       return result.rows.length > 0;
     } catch (error) {
       console.error('Error deleting payment:', error);
@@ -363,7 +359,7 @@ class PaymentsService {
     }
   }
   
-  async getPaymentMetrics(startDate, endDate, accountId, subaccountId) {
+  async getPaymentMetrics(startDate, endDate) {
     try {
       // Completed payments
       const completedQuery = `
@@ -373,7 +369,6 @@ class PaymentsService {
         FROM payments
         WHERE COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2
         AND status = 'completed'
-        AND account_id = $3 AND subaccount_id = $4
       `;
 
       // Refunded payments
@@ -384,7 +379,6 @@ class PaymentsService {
         FROM payments
         WHERE COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2
         AND status = 'refunded'
-        AND account_id = $3 AND subaccount_id = $4
       `;
 
       // Pending payments
@@ -395,7 +389,6 @@ class PaymentsService {
         FROM payments
         WHERE created_at >= $1 AND created_at <= $2
         AND status = 'pending'
-        AND account_id = $3 AND subaccount_id = $4
       `;
 
       // Income vs Expenses
@@ -408,14 +401,13 @@ class PaymentsService {
         FROM payments
         WHERE COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2
         AND status = 'completed'
-        AND account_id = $3 AND subaccount_id = $4
       `;
 
       const [completed, refunded, pending, incomeExpense] = await Promise.all([
-        databasePool.query(completedQuery, [startDate, endDate, accountId, subaccountId]),
-        databasePool.query(refundedQuery, [startDate, endDate, accountId, subaccountId]),
-        databasePool.query(pendingQuery, [startDate, endDate, accountId, subaccountId]),
-        databasePool.query(incomeExpenseQuery, [startDate, endDate, accountId, subaccountId])
+        databasePool.query(completedQuery, [startDate, endDate]),
+        databasePool.query(refundedQuery, [startDate, endDate]),
+        databasePool.query(pendingQuery, [startDate, endDate]),
+        databasePool.query(incomeExpenseQuery, [startDate, endDate])
       ]);
       
       const completedCount = parseInt(completed.rows[0].count) || 0;
@@ -454,9 +446,9 @@ class PaymentsService {
     }
   }
   // Nuevo método para obtener pagos con paginación (sin filtro de fecha)
-  async getPaymentsPaginated(offset, limit, accountId, subaccountId) {
+  async getPaymentsPaginated(offset, limit) {
     try {
-      const countQuery = `SELECT COUNT(*) as total FROM payments WHERE account_id = $1 AND subaccount_id = $2`;
+      const countQuery = `SELECT COUNT(*) as total FROM payments`;
 
       const dataQuery = `
         SELECT
@@ -479,14 +471,13 @@ class PaymentsService {
           c.company
         FROM payments p
         LEFT JOIN contacts c ON p.contact_id = c.contact_id
-        WHERE p.account_id = $1 AND p.subaccount_id = $2
         ORDER BY COALESCE(p.paid_at, p.created_at) DESC
-        LIMIT $3 OFFSET $4
+        LIMIT $1 OFFSET $2
       `;
 
       const [countResult, dataResult] = await Promise.all([
-        databasePool.query(countQuery, [accountId, subaccountId]),
-        databasePool.query(dataQuery, [accountId, subaccountId, limit, offset])
+        databasePool.query(countQuery),
+        databasePool.query(dataQuery, [limit, offset])
       ]);
 
       const payments = dataResult.rows.map(row => ({
@@ -521,13 +512,12 @@ class PaymentsService {
   }
 
   // Nuevo método para obtener pagos con paginación Y filtro de fecha
-  async getPaymentsWithPagination(startDate, endDate, offset, limit, accountId, subaccountId) {
+  async getPaymentsWithPagination(startDate, endDate, offset, limit) {
     try {
       const countQuery = `
         SELECT COUNT(*) as total
         FROM payments
         WHERE COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2
-        AND account_id = $3 AND subaccount_id = $4
       `;
 
       const dataQuery = `
@@ -552,14 +542,13 @@ class PaymentsService {
         FROM payments p
         LEFT JOIN contacts c ON p.contact_id = c.contact_id
         WHERE COALESCE(p.paid_at, p.created_at) >= $1 AND COALESCE(p.paid_at, p.created_at) <= $2
-        AND p.account_id = $3 AND p.subaccount_id = $4
         ORDER BY COALESCE(p.paid_at, p.created_at) DESC
-        LIMIT $5 OFFSET $6
+        LIMIT $3 OFFSET $4
       `;
 
       const [countResult, dataResult] = await Promise.all([
-        databasePool.query(countQuery, [startDate, endDate, accountId, subaccountId]),
-        databasePool.query(dataQuery, [startDate, endDate, accountId, subaccountId, limit, offset])
+        databasePool.query(countQuery, [startDate, endDate]),
+        databasePool.query(dataQuery, [startDate, endDate, limit, offset])
       ]);
 
       const payments = dataResult.rows.map(row => ({
@@ -589,6 +578,53 @@ class PaymentsService {
       };
     } catch (error) {
       console.error('Error fetching payments with pagination:', error);
+      throw error;
+    }
+  }
+
+  // Método agnóstico para obtener pagos por contact_id
+  async getPaymentsByContactId(contactId) {
+    try {
+      const query = `
+        SELECT
+          p.id,
+          p.transaction_id,
+          p.contact_id,
+          p.amount,
+          p.currency,
+          p.payment_method,
+          p.status,
+          p.description,
+          p.invoice_number,
+          COALESCE(p.paid_at, p.created_at) as date,
+          p.created_at,
+          p.updated_at
+        FROM payments p
+        WHERE p.contact_id = $1
+        ORDER BY COALESCE(p.paid_at, p.created_at) DESC
+      `;
+
+      const result = await databasePool.query(query, [contactId]);
+
+      // Mapear resultados al formato esperado por el frontend
+      const payments = result.rows.map(row => ({
+        id: row.id,
+        transactionId: row.transaction_id,
+        contactId: row.contact_id,
+        amount: row.amount,
+        currency: row.currency,
+        paymentMethod: row.payment_method,
+        status: row.status,
+        description: row.description,
+        invoiceNumber: row.invoice_number,
+        date: row.date,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+
+      return payments;
+    } catch (error) {
+      console.error('Error fetching payments by contact ID:', error);
       throw error;
     }
   }

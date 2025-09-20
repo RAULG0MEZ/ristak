@@ -1,6 +1,7 @@
 const path = require('path')
 require('dotenv').config({ path: path.join(__dirname, '../../../.env.local') })
 const { databasePool } = require('../config/database.config')
+const { getTimezoneOffset } = require('../utils/date-utils')
 // Fetch polyfill for Node < 18
 let _fetch = globalThis.fetch
 const fetch = async (...args) => {
@@ -95,16 +96,10 @@ class MetaService {
     const explicit = process.env.META_REDIRECT_URI
     if (explicit) return explicit
     
-    // Use API_BASE_URL if available
-    const apiBaseUrl = process.env.API_BASE_URL
-    if (apiBaseUrl) {
-      return `${apiBaseUrl}/meta/oauth/callback`
-    }
-    
     // Fallback basado en el entorno
     const port = process.env.API_PORT || 3002
     const host = process.env.NODE_ENV === 'production'
-      ? process.env.TRACK_HOST || 'https://app.hollytrack.com'
+      ? 'https://app.hollytrack.com'
       : `http://localhost:${port}`
     return `${host}/api/meta/oauth/callback`
   }
@@ -166,7 +161,7 @@ class MetaService {
     const me = await meRes.json()
 
     const expiresInSec = data2.expires_in ? parseInt(data2.expires_in) : null
-    const expiresAt = expiresInSec ? new Date(Date.now() + expiresInSec * 1000) : null
+    const expiresAt = expiresInSec ? new Date(Date.now() + expiresInSec * 1000).toISOString() : null
 
     // Update token and user info, but preserve existing configuration
     await this.upsertConfig({
@@ -251,7 +246,7 @@ class MetaService {
   async getAdAccounts() {
     const cfg = await this.getConfig()
     if (!cfg?.access_token) throw new Error('Meta not connected')
-    const url = `${GRAPH_BASE}/me/adaccounts?fields=id,account_id,name,account_status&limit=100&access_token=${encodeURIComponent(cfg.access_token)}`
+    const url = `${GRAPH_BASE}/me/adaccounts?fields=id,name,account_status&limit=100&access_token=${encodeURIComponent(cfg.access_token)}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`adaccounts fetch failed: ${res.status}`)
     const data = await res.json()
@@ -323,7 +318,9 @@ class MetaService {
     return map[s] || null
   }
 
-  async configure({ adAccountId, adAccountName, pixelId, pixelName, sinceDate, schedule }) {
+  async configure({ adAccountId, adAccountName, pixelId, pixelName, sinceDate, schedule}) {
+    console.log('[META CONFIGURE] 🔧 Configuring Meta...')
+
     // Check if this is a significant configuration change
     const existingConfig = await this.getConfig()
     const isNewAccount = !existingConfig?.ad_account_id || existingConfig.ad_account_id !== adAccountId
@@ -332,6 +329,29 @@ class MetaService {
 
     // Only do initial sync if account, pixel or date range changed significantly
     const needsInitialSync = isNewAccount || isNewPixel || isNewDateRange
+
+    // Obtener timezone de la cuenta de anuncios
+    let adAccountTimezone = null
+    if (adAccountId) {
+      const cfg = await this.getConfig()
+      if (cfg?.access_token) {
+        try {
+          // Obtener info de la cuenta incluyendo timezone
+          const accountUrl = `${GRAPH_BASE}/${adAccountId}?fields=timezone_name,timezone_id,timezone_offset_hours_utc&access_token=${encodeURIComponent(cfg.access_token)}`
+          const accountRes = await fetch(accountUrl)
+
+          if (accountRes.ok) {
+            const accountData = await accountRes.json()
+            adAccountTimezone = accountData.timezone_name || null
+            console.log(`[META CONFIGURE] 🌍 Cuenta configurada con timezone: ${adAccountTimezone} (offset: ${accountData.timezone_offset_hours_utc}h)`)
+          } else {
+            console.error('No se pudo obtener el timezone de la cuenta:', await accountRes.text())
+          }
+        } catch (err) {
+          console.error('Error obteniendo timezone de la cuenta:', err)
+        }
+      }
+    }
 
     // Generate CAPI token for the pixel
     let pixelCapiToken = null
@@ -352,11 +372,12 @@ class MetaService {
     await this.upsertConfig({
       ad_account_id: adAccountId,
       ad_account_name: adAccountName,
+      ad_account_timezone: adAccountTimezone, // Guardar timezone de la cuenta
       pixel_id: pixelId,
       pixel_name: pixelName,
       pixel_capi_token: pixelCapiToken,
       since_date: sinceDate,
-      schedule
+      schedule,
     })
 
     // Schedule periodic sync
@@ -382,6 +403,12 @@ class MetaService {
     if (this.syncState.running) return { alreadyRunning: true }
     const cfg = await this.getConfig()
     if (!cfg?.access_token || !cfg?.ad_account_id) throw new Error('Meta not configured')
+
+    // Obtener el timezone de la cuenta para normalizar fechas
+    const accountTimezone = cfg.ad_account_timezone || 'UTC'
+    console.log(`[META SYNC] Using account timezone: ${accountTimezone} for date normalization`)
+
+    console.log('[META SYNC] ✅ Starting sync...')
     
     // Use the configured since_date, not a default
     if (!cfg.since_date) {
@@ -401,7 +428,7 @@ class MetaService {
       await databasePool.query('BEGIN')
       await databasePool.query('DELETE FROM meta.meta_ads')
       await databasePool.query('COMMIT')
-      console.log('Cleared all existing meta ads data for initial sync')
+      console.log('Cleared existing meta ads data')
     } else {
       // INCREMENTAL SYNC: Only last 3 days
       until = new Date()
@@ -416,7 +443,7 @@ class MetaService {
         [since.toISOString().slice(0, 10)]
       )
       await databasePool.query('COMMIT')
-      console.log(`Cleared data from ${since.toISOString().slice(0, 10)} for incremental update`)
+      console.log(`Cleared data from ${since.toISOString().slice(0, 10)}`)
     }
 
     this.syncState = { running: true, startedAt: new Date().toISOString(), processed: 0, total: null, message: 'Fetching insights' }
@@ -447,7 +474,8 @@ class MetaService {
         this.syncState.message = `Fetching ${currentDate.toISOString().slice(0, 7)}...`
         
         const fields = ['date_start', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name', 'spend', 'reach', 'clicks', 'cpc']
-        const base = `${GRAPH_BASE}/act_${cfg.ad_account_id}/insights?level=ad&time_increment=1&fields=${encodeURIComponent(fields.join(','))}&time_range=${encodeURIComponent(timeRange)}&limit=500&access_token=${encodeURIComponent(cfg.access_token)}`
+        // Use the ad_account_id directly as it already comes with 'act_' prefix from frontend
+        const base = `${GRAPH_BASE}/${cfg.ad_account_id}/insights?level=ad&time_increment=1&fields=${encodeURIComponent(fields.join(','))}&time_range=${encodeURIComponent(timeRange)}&limit=500&access_token=${encodeURIComponent(cfg.access_token)}`
         
         let url = base
         const monthRows = []
@@ -502,14 +530,23 @@ class MetaService {
       const chunkSize = 25 // Much smaller chunks to avoid DB timeout
       const toDecimal = (v) => v == null ? null : Number(v)
       let insertedCount = 0
-      
+
+      // Obtener el offset del timezone para normalizar fechas
+      const timezoneOffset = getTimezoneOffset(accountTimezone)
+      console.log(`[META SYNC] Normalizing dates from ${accountTimezone} (offset: ${timezoneOffset}h) to UTC`)
+
       for (let i = 0; i < allRows.length; i += chunkSize) {
         const part = allRows.slice(i, i + chunkSize)
         const values = []
         const params = []
-        
+
         part.forEach((r, idx) => {
-          const d = r.date_start
+          // NORMALIZACIÓN CRÍTICA: La fecha viene en el timezone de la cuenta, convertir a UTC
+          // Si viene "2025-09-19" de una cuenta en México (-6), debe guardarse como UTC real
+          const metaDate = new Date(r.date_start + 'T12:00:00.000Z') // Mediodía para evitar problemas de DST
+          metaDate.setHours(metaDate.getHours() + timezoneOffset) // Ajustar por el offset para obtener UTC real
+          const d = metaDate.toISOString().slice(0, 10) // Fecha en UTC real
+
           const spend = toDecimal(r.spend) || 0
           const reach = parseInt(r.reach || '0', 10)
           const clicks = parseInt(r.clicks || '0', 10)
@@ -525,8 +562,7 @@ class MetaService {
             await databasePool.query('BEGIN')
             await databasePool.query(
               `INSERT INTO meta.meta_ads (
-                date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, reach, clicks, cpc, ad_account_id
-              ) VALUES ${values.join(', ')}`,
+                date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, reach, clicks, cpc, ad_account_id) VALUES ${values.join(', ')}`,
               params
             )
             await databasePool.query('COMMIT')
@@ -552,7 +588,7 @@ class MetaService {
 
       await this.upsertConfig({ sync_status: 'idle', last_sync_at: new Date().toISOString(), last_sync_error: null })
       this.syncState = { running: false, startedAt: this.syncState.startedAt, processed: this.syncState.processed, total: this.syncState.total, message: 'Done' }
-      console.log(`Sync completed successfully. Inserted ${this.syncState.total || 0} rows`)
+      console.log(`[META SYNC] ✅ Sync completed successfully. Inserted ${this.syncState.total || 0} rows`)
       return { inserted: this.syncState.total || 0 }
     } catch (err) {
       console.error('Meta sync failed:', err)

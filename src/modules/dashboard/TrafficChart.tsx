@@ -8,16 +8,21 @@ import { useTheme } from '../../contexts/ThemeContext'
 
 // Mapeo mejorado de iconos y colores para cada plataforma
 const sourceConfig: Record<string, { icon: any; brandColor: string }> = {
+  'Facebook Ads': { icon: Icons.facebook, brandColor: '#1877F2' },
   'Facebook': { icon: Icons.facebook, brandColor: '#1877F2' },
   'Instagram': { icon: Icons.image, brandColor: '#E4405F' },
   'Google': { icon: Icons.google, brandColor: '#4285F4' },
+  'Google Ads': { icon: Icons.google, brandColor: '#4285F4' },
   'Directo': { icon: Icons.users, brandColor: '#6B7280' },
+  'Orgánico': { icon: Icons.search, brandColor: '#10B981' },
+  'Referidos': { icon: Icons.userPlus, brandColor: '#F59E0B' },
   'TikTok': { icon: Icons.play, brandColor: '#000000' },
   'Email': { icon: Icons.send, brandColor: '#10B981' },
   'YouTube': { icon: Icons.play, brandColor: '#FF0000' },
   'LinkedIn': { icon: Icons.building, brandColor: '#0A66C2' },
   'Twitter': { icon: Icons.megaphone, brandColor: '#1DA1F2' },
   'WhatsApp': { icon: Icons.phone, brandColor: '#25D366' },
+  'Otros': { icon: Icons.globe, brandColor: '#9CA3AF' },
   'Other': { icon: Icons.globe, brandColor: '#9CA3AF' }
 }
 
@@ -30,7 +35,7 @@ export function TrafficChart() {
   })
   
   // Enriquecer datos con iconos y colores de marca
-  const data = trafficData.map((item, index) => {
+  const data = trafficData.length > 0 ? trafficData.map((item) => {
     const config = sourceConfig[item.name] || sourceConfig.Other
     return {
       ...item,
@@ -40,8 +45,8 @@ export function TrafficChart() {
         ? `${config.brandColor}99` // 60% opacidad en dark mode
         : config.brandColor // Color completo en light mode
     }
-  })
-  
+  }) : []
+
   const totalVisits = data.reduce((sum, item) => sum + item.value, 0)
   const maxValue = Math.max(...data.map(d => d.value), 1) // Evitar división por 0
   
@@ -76,7 +81,7 @@ export function TrafficChart() {
             <div className="flex items-center justify-center h-full">
               <div className="animate-pulse text-tertiary">Cargando datos...</div>
             </div>
-          ) : (
+          ) : data.length > 0 ? (
           <>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -93,8 +98,8 @@ export function TrafficChart() {
                   stroke="none"
                 >
                   {data.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
+                    <Cell
+                      key={`cell-${index}`}
                       fill={entry.color}
                       className="transition-opacity hover:opacity-80"
                     />
@@ -102,7 +107,7 @@ export function TrafficChart() {
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
-            
+
             {/* Centro del donut con estadística principal */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center">
@@ -111,6 +116,14 @@ export function TrafficChart() {
               </div>
             </div>
           </>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <Icons.globe className="w-12 h-12 text-tertiary mb-2 mx-auto" />
+                <p className="text-sm text-tertiary">Sin datos de tráfico</p>
+                <p className="text-xs text-tertiary mt-1">Los datos aparecerán cuando haya visitas</p>
+              </div>
+            </div>
           )}
         </div>
 

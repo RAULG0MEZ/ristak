@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { getApiUrl } from '../config/api';
+import { getApiUrl, fetchWithAuth, getAuthHeaders } from '../config/api';
+import { dateToApiString } from '../lib/dateUtils';
 
 interface Contact {
   id: string;
@@ -83,9 +84,12 @@ export function useContacts(options: UseContactsOptions = {}) {
         contactsUrl = getApiUrl(`/contacts?all=true&page=${actualPage}&limit=${actualLimit}`);
         // No metrics for all mode
       } else if (start && end) {
-        // Fetch with date filter
-        contactsUrl = getApiUrl(`/contacts?start=${start.toISOString()}&end=${end.toISOString()}&page=${actualPage}&limit=${actualLimit}`);
-        metricsUrl = getApiUrl(`/contacts/metrics?start=${start.toISOString()}&end=${end.toISOString()}`);
+        // Formatear fechas como YYYY-MM-DD para evitar problemas de timezone
+        const startStr = dateToApiString(start);
+        const endStr = dateToApiString(end);
+
+        contactsUrl = getApiUrl(`/contacts?start=${startStr}&end=${endStr}&page=${actualPage}&limit=${actualLimit}`);
+        metricsUrl = getApiUrl(`/contacts/metrics?start=${startStr}&end=${endStr}`);
       } else {
         // No data to fetch
         setContacts([]);
@@ -95,9 +99,9 @@ export function useContacts(options: UseContactsOptions = {}) {
         return;
       }
 
-      const promises: Promise<Response>[] = [fetch(contactsUrl)];
+      const promises: Promise<Response>[] = [fetchWithAuth(contactsUrl)];
       if (metricsUrl) {
-        promises.push(fetch(metricsUrl));
+        promises.push(fetchWithAuth(metricsUrl));
       }
 
       const responses = await Promise.all(promises);
@@ -141,7 +145,7 @@ export function useContacts(options: UseContactsOptions = {}) {
     company?: string;
   }) => {
     try {
-      const response = await fetch(getApiUrl('/contacts'), {
+      const response = await fetchWithAuth(getApiUrl('/contacts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -161,7 +165,7 @@ export function useContacts(options: UseContactsOptions = {}) {
 
   const updateContact = async (id: string, data: Partial<Contact>) => {
     try {
-      const response = await fetch(getApiUrl(`/contacts/${id}`), {
+      const response = await fetchWithAuth(getApiUrl(`/contacts/${id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -193,7 +197,7 @@ export function useContacts(options: UseContactsOptions = {}) {
 
   const deleteContact = async (id: string) => {
     try {
-      const response = await fetch(getApiUrl(`/contacts/${id}`), {
+      const response = await fetchWithAuth(getApiUrl(`/contacts/${id}`), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -211,7 +215,7 @@ export function useContacts(options: UseContactsOptions = {}) {
 
   const bulkDeleteContacts = async (ids: string[]) => {
     try {
-      const response = await fetch(getApiUrl('/contacts/bulk-delete'), {
+      const response = await fetchWithAuth(getApiUrl('/contacts/bulk-delete'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids })

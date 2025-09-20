@@ -1,15 +1,47 @@
 import React from 'react'
 import { Card } from '../../ui'
 import { Icons } from '../../icons'
-
-const funnelData = [
-  { stage: 'Clicks', value: 1234, rate: 100 },
-  { stage: 'Leads', value: 456, rate: 37 },
-  { stage: 'Citas', value: 123, rate: 27 },
-  { stage: 'Ventas', value: 45, rate: 37 },
-]
+import { useFunnelData } from '../../hooks/useFunnelData'
 
 export function ConversionFunnel() {
+  const { data: funnelStages, loading, error } = useFunnelData()
+
+  // Calcular porcentajes de conversión basados en el primer stage con valor
+  const calculateConversionRates = () => {
+    if (!funnelStages || funnelStages.length === 0) return []
+
+    // Encontrar el primer stage con valor > 0 para usarlo como base
+    const firstStageWithValue = funnelStages.find(s => s.value > 0)
+    const baseValue = firstStageWithValue?.value || 1
+
+    return funnelStages.map((stage, index) => ({
+      ...stage,
+      rate: baseValue > 0 ? Math.round((stage.value / baseValue) * 100) : 0
+    }))
+  }
+
+  const funnelData = calculateConversionRates()
+
+  if (loading) {
+    return (
+      <Card variant="glass" className="p-4">
+        <div className="flex items-center justify-center h-48">
+          <span className="text-gray-400">Cargando embudo...</span>
+        </div>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card variant="glass" className="p-4">
+        <div className="flex items-center justify-center h-48">
+          <span className="text-red-400">Error al cargar el embudo</span>
+        </div>
+      </Card>
+    )
+  }
+
   return (
     <Card variant="glass" className="p-4">
       <div className="flex items-center justify-between mb-4">
@@ -24,7 +56,7 @@ export function ConversionFunnel() {
               <span className="text-sm text-gray-400">{stage.stage}</span>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-white">{stage.value}</span>
-                {index > 0 && (
+                {index > 0 && stage.value > 0 && (
                   <span className="text-xs text-gray-400">({stage.rate}%)</span>
                 )}
               </div>
@@ -37,13 +69,6 @@ export function ConversionFunnel() {
             </div>
           </div>
         ))}
-      </div>
-
-      <div className="mt-4 pt-4 border-t border-white/10">
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-400">Tasa de conversión total</span>
-          <span className="font-medium text-white">3.65%</span>
-        </div>
       </div>
     </Card>
   )

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { ImportJob } from '../types'
-import { getApiUrl } from '../config/api'
+import { getApiUrl, fetchWithAuth } from '../config/api'
 
 export function useImportJobs() {
   const [jobs, setJobs] = useState<ImportJob[]>([])
@@ -9,7 +9,7 @@ export function useImportJobs() {
   // Obtener todos los jobs activos
   const fetchJobs = async () => {
     try {
-      const response = await fetch(getApiUrl('/import/async/jobs'))
+      const response = await fetchWithAuth(getApiUrl('/import/async/jobs'))
       if (response.ok) {
         const data = await response.json()
         
@@ -39,7 +39,7 @@ export function useImportJobs() {
   // Obtener estado de un job específico
   const fetchJobStatus = async (jobId: string): Promise<ImportJob | null> => {
     try {
-      const response = await fetch(getApiUrl(`/import/async/status/${jobId}`))
+      const response = await fetchWithAuth(getApiUrl(`/import/async/status/${jobId}`))
       if (response.ok) {
         return await response.json()
       }
@@ -52,7 +52,7 @@ export function useImportJobs() {
   // Iniciar nueva importación
   const startImport = async (data: any[], type: 'contacts' | 'payments' | 'appointments') => {
     try {
-      const response = await fetch(getApiUrl('/import/async/start'), {
+      const response = await fetchWithAuth(getApiUrl('/import/async/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data, type })

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { cn } from '../../lib/utils'
+import { getCurrentYear, formatDateShort, dateToApiString, createDateInTimezone } from '../../lib/dateUtils'
 import { Icons } from '../../icons'
 
 interface DateRangeSelectorProps {
@@ -36,17 +37,14 @@ export function DateRangeSelector({
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
   ]
 
-  const currentYear = new Date().getFullYear()
+  const currentYear = getCurrentYear()
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i)
 
   // Obtener el label actual según el tipo de vista
   const getCurrentLabel = () => {
     if (viewType === 'day') {
       const formatDate = (date: Date) => {
-        const d = date.getDate()
-        const m = months[date.getMonth()].substring(0, 3)
-        const y = date.getFullYear()
-        return `${d} ${m} ${y}`
+        return formatDateShort(date)
       }
       return `${formatDate(dateRange.start)} - ${formatDate(dateRange.end)}`
     } else if (viewType === 'month') {
@@ -84,8 +82,8 @@ export function DateRangeSelector({
               <button
                 key={range.label}
                 onClick={() => {
-                  const end = new Date()
-                  const start = new Date()
+                  const end = createDateInTimezone()
+                  let start = createDateInTimezone()
                   if (range.days === 0) {
                     onDateRangeChange({ start: end, end })
                   } else if (range.days === 1) {
@@ -110,20 +108,26 @@ export function DateRangeSelector({
               <input
                 type="date"
                 className="w-full px-3 py-2 bg-secondary border border-primary rounded text-primary text-sm"
-                value={dateRange.start.toISOString().split('T')[0]}
-                onChange={(e) => onDateRangeChange({ 
-                  ...dateRange, 
-                  start: new Date(e.target.value) 
-                })}
+                value={dateToApiString(dateRange.start)}
+                onChange={(e) => {
+                  const [year, month, day] = e.target.value.split('-').map(Number)
+                  onDateRangeChange({
+                    ...dateRange,
+                    start: createDateInTimezone(year, month - 1, day, 0, 0)
+                  })
+                }}
               />
               <input
                 type="date"
                 className="w-full px-3 py-2 bg-secondary border border-primary rounded text-primary text-sm"
-                value={dateRange.end.toISOString().split('T')[0]}
-                onChange={(e) => onDateRangeChange({ 
-                  ...dateRange, 
-                  end: new Date(e.target.value) 
-                })}
+                value={dateToApiString(dateRange.end)}
+                onChange={(e) => {
+                  const [year, month, day] = e.target.value.split('-').map(Number)
+                  onDateRangeChange({
+                    ...dateRange,
+                    end: createDateInTimezone(year, month - 1, day, 23, 59)
+                  })
+                }}
               />
             </div>
           </div>

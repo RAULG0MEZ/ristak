@@ -13,7 +13,7 @@ import {
   type CSVMapping,
   type ParsedCSVData 
 } from '../../lib/csvUtils'
-import { getApiUrl } from '../../config/api'
+import { getApiUrl, fetchWithAuth } from '../../config/api'
 
 interface CSVImportModalProps {
   isOpen: boolean
@@ -31,6 +31,7 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [selectedTimezone, setSelectedTimezone] = useState<string>('America/Mexico_City')
   const [importResult, setImportResult] = useState<{
     success: boolean
     processed: number
@@ -45,6 +46,22 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
     { value: 'contacts', label: 'Contactos - Para importar personas/clientes' },
     { value: 'appointments', label: 'Citas - Para marcar contactos que ya agendaron una cita' },
     { value: 'payments', label: 'Pagos - Para importar transacciones de pago' },
+  ]
+
+  // Opciones de timezone comunes
+  const timezoneOptions = [
+    { value: 'America/Mexico_City', label: '🇲🇽 México (Ciudad de México) UTC-6' },
+    { value: 'America/Tijuana', label: '🇲🇽 México (Tijuana) UTC-7' },
+    { value: 'America/Cancun', label: '🇲🇽 México (Cancún) UTC-5' },
+    { value: 'America/New_York', label: '🇺🇸 Nueva York UTC-5' },
+    { value: 'America/Los_Angeles', label: '🇺🇸 Los Ángeles UTC-8' },
+    { value: 'America/Chicago', label: '🇺🇸 Chicago UTC-6' },
+    { value: 'America/Bogota', label: '🇨🇴 Bogotá UTC-5' },
+    { value: 'America/Buenos_Aires', label: '🇦🇷 Buenos Aires UTC-3' },
+    { value: 'America/Sao_Paulo', label: '🇧🇷 São Paulo UTC-3' },
+    { value: 'Europe/Madrid', label: '🇪🇸 Madrid UTC+1' },
+    { value: 'Europe/London', label: '🇬🇧 Londres UTC+0' },
+    { value: 'Europe/Paris', label: '🇫🇷 París UTC+1' },
   ]
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -99,42 +116,34 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
 
   const handleImport = async () => {
     if (!csvData) return
-    
+
     setCurrentStep('processing')
     setIsProcessing(true)
-    
+
     try {
-      // Procesar todos los rows
-      const processedData = csvData.rows.map(row => 
-        processCSVRow(row, csvData.headers, mapping, importType)
+      // Procesar todos los rows con el timezone seleccionado
+      const processedData = csvData.rows.map(row =>
+        processCSVRow(row, csvData.headers, mapping, importType, selectedTimezone)
       )
 
-      // Log para debugging
-      if (import.meta.env.DEV) {
-        console.log('Datos procesados para enviar:', {
-          type: importType,
-          totalRows: processedData.length,
-          sample: processedData[0]
-        })
-      }
-
-      
       // Para archivos grandes (>100 registros), usar importación asíncrona
       const isLargeFile = processedData.length > 100
-      
+
       if (isLargeFile) {
         // Importación asíncrona con progreso
-        const response = await fetch(getApiUrl('/import/async/start'), {
+        const url = getApiUrl('/import/async/start')
+        const response = await fetchWithAuth(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             data: processedData,
-            type: importType
+            type: importType,
+            timezone: selectedTimezone
           })
         })
-        
+
         if (!response.ok) {
           throw new Error(`Error en importación: ${response.statusText}`)
         }
@@ -160,18 +169,22 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
         
       } else {
         // Importación síncrona para archivos pequeños
-        const response = await fetch(getApiUrl(`/import/${importType}`), {
+        const url = getApiUrl(`/import/${importType}`)
+        const bodyData = {
+          data: processedData,
+          mapping: mapping,
+          importType: importType,
+          timezone: selectedTimezone
+        }
+
+        const response = await fetchWithAuth(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            data: processedData,
-            mapping: mapping,
-            importType: importType
-          })
+          body: JSON.stringify(bodyData)
         })
-        
+
         if (!response.ok) {
           throw new Error(`Error en importación: ${response.statusText}`)
         }
@@ -189,7 +202,7 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
         setCurrentStep('result')
         setIsProcessing(false)
       }
-      
+
     } catch (error) {
       setImportResult({
         success: false,
@@ -226,6 +239,37 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
       case 'upload':
         return (
           <div className="space-y-4">
+            {/* Selector de Timezone */}
+            <Card variant="info" className="glass">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Icons.calendar className="w-5 h-5 text-accent-blue" />
+                  <h3 className="text-base font-semibold text-primary">
+                    Zona horaria de los datos
+                  </h3>
+                </div>
+                <p className="text-sm text-secondary">
+                  Selecciona la zona horaria en la que están las fechas del CSV.
+                  Esto es importante para convertir correctamente las fechas a UTC.
+                </p>
+                <Select
+                  value={selectedTimezone}
+                  onChange={(e) => setSelectedTimezone(e.target.value)}
+                  className="w-full"
+                >
+                  {timezoneOptions.map(tz => (
+                    <option key={tz.value} value={tz.value}>
+                      {tz.label}
+                    </option>
+                  ))}
+                </Select>
+                <div className="text-xs text-tertiary bg-glass-subtle p-2 rounded">
+                  💡 Tip: Si importas contactos de España, selecciona Madrid UTC+1.
+                  Si son de México, selecciona la ciudad correspondiente.
+                </div>
+              </div>
+            </Card>
+
             <Card variant="default" className="glass border-2 border-dashed border-tertiary hover:border-accent-blue transition-colors">
               <div className="text-center py-8">
                 <Icons.request className="w-12 h-12 text-accent-blue mx-auto mb-4" />

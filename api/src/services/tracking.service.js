@@ -1,41 +1,51 @@
 const { databasePool } = require('../config/database.config');
 const cloudflareService = require('./cloudflare.service');
 const crypto = require('crypto');
+const { verifyCname } = require('../utils/dns-helper');
 
 class TrackingService {
   // Crear nuevo dominio de tracking - ESPERA HASTA TENER AMBOS REGISTROS
-  async createTrackingDomain(subaccountId, hostname) {
+  async createTrackingDomain(hostname) {
     const client = await databasePool.connect();
 
     try {
       await client.query('BEGIN');
 
-      // Usar el subaccount_id directamente (ya debe venir del request)
-      if (!subaccountId) {
-        subaccountId = process.env.DEFAULT_SUBACCOUNT_ID;
-      }
-
-      // Verificar si ya existe un dominio para esta subcuenta (limite 1 por subcuenta)
-      const existingSubaccount = await client.query(
-        'SELECT id, hostname FROM public.tracking_domains WHERE subaccount_id = $1',
-        [subaccountId]
-      );
-
-      if (existingSubaccount.rows.length > 0) {
-        throw new Error(`Ya existe un dominio de tracking para esta subcuenta: ${existingSubaccount.rows[0].hostname}. Elimina el dominio existente antes de agregar uno nuevo.`);
-      }
-
-      // Verificar si el hostname ya existe (para cualquier owner)
+      // Verificar si el hostname ya existe
       const existingHostname = await client.query(
         'SELECT id FROM public.tracking_domains WHERE hostname = $1',
         [hostname]
       );
 
       if (existingHostname.rows.length > 0) {
-        throw new Error('Este hostname ya está en uso por otra cuenta');
+        throw new Error('Este hostname ya está registrado');
       }
 
-      // Crear hostname en Cloudflare
+      // VERIFICAR CNAME ANTES DE CREAR EN CLOUDFLARE
+      const expectedTarget = process.env.TRACKING_HOST;
+
+      if (!expectedTarget) {
+        throw new Error('TRACKING_HOST no está configurado en las variables de entorno. Define TRACKING_HOST en .env.local');
+      }
+
+      console.log(`🔍 Verificando CNAME de ${hostname} -> ${expectedTarget}`);
+
+      const cnameVerification = await verifyCname(hostname, expectedTarget, 3);
+
+      if (!cnameVerification) {
+        throw new Error(
+          `El dominio ${hostname} NO está apuntando correctamente a ${expectedTarget}. ` +
+          `Por favor configura el registro CNAME en tu proveedor DNS:\n` +
+          `Tipo: CNAME\n` +
+          `Nombre: ${hostname}\n` +
+          `Valor: ${expectedTarget}\n` +
+          `Espera 5-10 minutos para propagación DNS y vuelve a intentar.`
+        );
+      }
+
+      console.log(`✅ CNAME verificado correctamente: ${hostname} -> ${cnameVerification}`);
+
+      // Crear hostname en Cloudflare SOLO si el CNAME está correcto
       const cfResult = await cloudflareService.createCustomHostname(hostname);
       console.log('Cloudflare initial response:', JSON.stringify(cfResult, null, 2));
 
@@ -71,13 +81,12 @@ class TrackingService {
       // Guardar en base de datos con AMBOS registros completos
       const insertResult = await client.query(`
         INSERT INTO public.tracking_domains (
-          subaccount_id, hostname, status, cf_hostname_id,
+          hostname, status, cf_hostname_id,
           dcv_method, dcv_record_name, dcv_record_value,
           dns_instructions, ssl_status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
       `, [
-        subaccountId,
         hostname,
         'verifying',
         cfResult.hostnameId,
@@ -105,17 +114,11 @@ class TrackingService {
     }
   }
 
-  // Obtener dominios de tracking por subcuenta
-  async getTrackingDomains(subaccountId) {
+  // Obtener todos los dominios de tracking
+  async getTrackingDomains() {
     try {
-      // Si no hay subaccountId, usar el default
-      if (!subaccountId) {
-        subaccountId = process.env.DEFAULT_SUBACCOUNT_ID;
-      }
-
       const result = await databasePool.query(
-        'SELECT * FROM public.tracking_domains WHERE subaccount_id = $1 ORDER BY created_at DESC',
-        [subaccountId]
+        'SELECT * FROM public.tracking_domains ORDER BY created_at DESC'
       );
 
       return result.rows;
@@ -177,89 +180,15 @@ class TrackingService {
     }
   }
 
-  // Registrar visita (pageview)
-  async recordPageView(data) {
-    try {
-      // Generar IDs únicos
-      const sessionId = this.generateSessionId(data);
-      const visitorId = this.generateVisitorId(data);
-
-      // Parsear URL
-      const url = new URL(data.url);
-
-      // Extraer parámetros UTM y otros
-      const params = Object.fromEntries(url.searchParams);
-
-      // Insertar en tracking.sessions
-      const result = await databasePool.query(`
-        INSERT INTO tracking.sessions (
-          session_id,
-          account_id,
-          subaccount_id,
-          visitor_id,
-          contact_id,
-          event_name,
-          landing_url,
-          landing_host,
-          landing_path,
-          landing_query,
-          referrer_url,
-          referrer_domain,
-          utm_source,
-          utm_medium,
-          utm_campaign,
-          utm_term,
-          utm_content,
-          user_agent,
-          ip,
-          device_type,
-          pageviews_count
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-        ON CONFLICT (session_id) DO UPDATE SET
-          last_event_at = CURRENT_TIMESTAMP,
-          pageviews_count = tracking.sessions.pageviews_count + 1
-        RETURNING *
-      `, [
-        sessionId,
-        data.accountId || process.env.ACCOUNT_ID,
-        data.subaccountId || process.env.DEFAULT_SUBACCOUNT_ID,
-        visitorId,
-        null, // contact_id se puede vincular después
-        'page_view',
-        data.url,
-        url.hostname,
-        url.pathname,
-        url.search,
-        data.referrer || null,
-        data.referrer ? new URL(data.referrer).hostname : null,
-        params.utm_source || null,
-        params.utm_medium || null,
-        params.utm_campaign || null,
-        params.utm_term || null,
-        params.utm_content || null,
-        data.userAgent || null,
-        data.ip || null,
-        this.detectDeviceType(data.userAgent),
-        1
-      ]);
-
-      return {
-        success: true,
-        sessionId: sessionId,
-        visitorId: visitorId
-      };
-    } catch (error) {
-      console.error('Error recording page view:', error);
-      throw error;
-    }
-  }
-
-  // Generar session ID único
+  // Generar session ID único con timeout de 30 minutos
   generateSessionId(data) {
     const hash = crypto.createHash('sha256');
     hash.update(data.ip || '');
     hash.update(data.userAgent || '');
-    hash.update(new Date().toISOString().slice(0, 10)); // Fecha actual
+    // Agregar ventana de 30 minutos para nueva sesión
+    const now = new Date();
+    const sessionWindow = Math.floor(now.getTime() / (30 * 60 * 1000)); // 30 min windows
+    hash.update(sessionWindow.toString());
     return 'sess_' + hash.digest('hex').slice(0, 16);
   }
 
@@ -281,17 +210,109 @@ class TrackingService {
     return 'desktop';
   }
 
-  // Obtener dominio activo para la subcuenta
-  async getActiveDomain(subaccountId) {
-    try {
-      // Si no hay subaccountId, usar el default
-      if (!subaccountId) {
-        subaccountId = process.env.DEFAULT_SUBACCOUNT_ID;
-      }
+  // Parsear información del navegador
+  parseBrowserInfo(userAgent) {
+    if (!userAgent) {
+      return { browser: 'unknown', version: null, os: 'unknown' };
+    }
 
+    const ua = userAgent.toLowerCase();
+    let browser = 'unknown';
+    let version = null;
+    let os = 'unknown';
+
+    // Detectar navegador
+    if (ua.includes('chrome') && !ua.includes('edg')) {
+      browser = 'chrome';
+      const match = ua.match(/chrome\/(\d+)/);
+      version = match ? match[1] : null;
+    } else if (ua.includes('safari') && !ua.includes('chrome')) {
+      browser = 'safari';
+      const match = ua.match(/version\/(\d+)/);
+      version = match ? match[1] : null;
+    } else if (ua.includes('firefox')) {
+      browser = 'firefox';
+      const match = ua.match(/firefox\/(\d+)/);
+      version = match ? match[1] : null;
+    } else if (ua.includes('edg')) {
+      browser = 'edge';
+      const match = ua.match(/edg\/(\d+)/);
+      version = match ? match[1] : null;
+    }
+
+    // Detectar OS
+    if (ua.includes('windows')) os = 'windows';
+    else if (ua.includes('mac')) os = 'macos';
+    else if (ua.includes('linux')) os = 'linux';
+    else if (ua.includes('android')) os = 'android';
+    else if (ua.includes('iphone') || ua.includes('ipad')) os = 'ios';
+
+    return { browser, version, os };
+  }
+
+  // Detectar canal de tráfico
+  detectChannel(params, referrerDomain) {
+    // Prioridad 1: Paid ads
+    if (params.gclid || params.fbclid || params.msclkid || params.ttclid) {
+      return 'paid';
+    }
+
+    // Prioridad 2: UTM medium
+    if (params.utm_medium) {
+      const medium = params.utm_medium.toLowerCase();
+      if (medium.includes('cpc') || medium.includes('ppc') || medium.includes('paid')) {
+        return 'paid';
+      }
+      if (medium.includes('email')) {
+        return 'email';
+      }
+      if (medium.includes('social')) {
+        return 'social';
+      }
+      if (medium === 'organic') {
+        return 'organic';
+      }
+    }
+
+    // Prioridad 3: UTM source
+    if (params.utm_source) {
+      const source = params.utm_source.toLowerCase();
+      if (source.includes('facebook') || source.includes('instagram') || source.includes('twitter')) {
+        return 'social';
+      }
+      if (source.includes('google') || source.includes('bing')) {
+        return params.utm_medium ? 'paid' : 'organic';
+      }
+    }
+
+    // Prioridad 4: Referrer
+    if (referrerDomain) {
+      const domain = referrerDomain.toLowerCase();
+      // Social networks
+      if (domain.includes('facebook.com') || domain.includes('instagram.com') ||
+          domain.includes('twitter.com') || domain.includes('linkedin.com') ||
+          domain.includes('tiktok.com') || domain.includes('youtube.com')) {
+        return 'social';
+      }
+      // Search engines
+      if (domain.includes('google.') || domain.includes('bing.com') ||
+          domain.includes('yahoo.com') || domain.includes('duckduckgo.com')) {
+        return 'organic';
+      }
+      // Otro referrer
+      return 'referral';
+    }
+
+    // Sin referrer = Direct
+    return 'direct';
+  }
+
+  // Obtener dominio activo
+  async getActiveDomain() {
+    try {
       const result = await databasePool.query(
-        'SELECT * FROM public.tracking_domains WHERE subaccount_id = $1 AND status = $2 LIMIT 1',
-        [subaccountId, 'active']
+        'SELECT * FROM public.tracking_domains WHERE status = $1 AND is_active = true LIMIT 1',
+        ['active']
       );
 
       return result.rows[0] || null;
@@ -445,7 +466,7 @@ class TrackingService {
   }
 
   // Eliminar dominio de tracking
-  async deleteTrackingDomain(domainId, subaccountId) {
+  async deleteTrackingDomain(domainId) {
     const client = await databasePool.connect();
 
     try {
@@ -453,12 +474,12 @@ class TrackingService {
 
       // Obtener información del dominio antes de eliminar
       const domainResult = await client.query(
-        'SELECT * FROM public.tracking_domains WHERE id = $1 AND subaccount_id = $2',
-        [domainId, subaccountId]
+        'SELECT * FROM public.tracking_domains WHERE id = $1',
+        [domainId]
       );
 
       if (domainResult.rows.length === 0) {
-        throw new Error('Dominio no encontrado o no pertenece a esta subcuenta');
+        throw new Error('Dominio no encontrado');
       }
 
       const domain = domainResult.rows[0];
@@ -488,6 +509,123 @@ class TrackingService {
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('Error eliminando dominio:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // Sincronizar dominios con Cloudflare
+  async syncWithCloudflare() {
+    const client = await databasePool.connect();
+
+    try {
+      console.log('🔄 Starting sync with Cloudflare...');
+
+      // Obtener todos los hostnames de Cloudflare
+      const cloudflareHostnames = await cloudflareService.getAllCustomHostnames();
+      console.log(`Found ${cloudflareHostnames.length} hostnames in Cloudflare`);
+
+      // Obtener todos los dominios de la base de datos
+      const dbResult = await client.query('SELECT * FROM public.tracking_domains');
+      const dbDomains = dbResult.rows;
+      console.log(`Found ${dbDomains.length} domains in database`);
+
+      // Crear un mapa de dominios existentes en DB
+      const dbDomainMap = new Map(dbDomains.map(d => [d.hostname, d]));
+
+      let added = 0;
+      let updated = 0;
+
+      // Sincronizar cada hostname de Cloudflare
+      for (const cfHostname of cloudflareHostnames) {
+        const existingDomain = dbDomainMap.get(cfHostname.hostname);
+
+        if (!existingDomain) {
+          // Dominio nuevo encontrado en Cloudflare, agregarlo a la DB
+          console.log(`📥 Adding new domain from Cloudflare: ${cfHostname.hostname}`);
+
+          // Obtener detalles completos del hostname
+          const details = await cloudflareService.getHostnameStatus(cfHostname.id);
+
+          // Extraer registros DNS
+          const sslRecord = details.validationRecords.find(r => r.purpose === 'ssl_validation');
+          const ownershipRecord = details.validationRecords.find(r => r.purpose === 'ownership_verification');
+
+          await client.query(`
+            INSERT INTO public.tracking_domains (
+              hostname, status, cf_hostname_id,
+              dcv_method, dcv_record_name, dcv_record_value,
+              dns_instructions, ssl_status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (hostname) DO NOTHING
+          `, [
+            cfHostname.hostname,
+            cfHostname.isActive ? 'active' : 'verifying',
+            cfHostname.id,
+            'txt',
+            sslRecord?.name || null,
+            sslRecord?.value || null,
+            JSON.stringify(details.validationRecords),
+            cfHostname.sslStatus || 'pending_validation'
+          ]);
+
+          added++;
+        } else if (existingDomain.cf_hostname_id !== cfHostname.id ||
+                   existingDomain.status !== (cfHostname.isActive ? 'active' : 'verifying')) {
+          // Actualizar estado si cambió
+          console.log(`🔄 Updating domain status: ${cfHostname.hostname}`);
+
+          await client.query(`
+            UPDATE public.tracking_domains
+            SET status = $1,
+                ssl_status = $2,
+                cf_hostname_id = $3,
+                last_checked_at = CURRENT_TIMESTAMP,
+                dcv_verified_at = CASE
+                  WHEN $1 = 'active' AND dcv_verified_at IS NULL
+                  THEN CURRENT_TIMESTAMP
+                  ELSE dcv_verified_at
+                END
+            WHERE hostname = $4
+          `, [
+            cfHostname.isActive ? 'active' : 'verifying',
+            cfHostname.sslStatus || 'pending_validation',
+            cfHostname.id,
+            cfHostname.hostname
+          ]);
+
+          updated++;
+        }
+      }
+
+      // Opcionalmente: marcar como eliminados los que ya no están en Cloudflare
+      const cfHostnameSet = new Set(cloudflareHostnames.map(h => h.hostname));
+      let removed = 0;
+
+      for (const dbDomain of dbDomains) {
+        if (!cfHostnameSet.has(dbDomain.hostname) && dbDomain.cf_hostname_id) {
+          console.log(`🗑️ Domain no longer in Cloudflare: ${dbDomain.hostname}`);
+          // Puedes elegir eliminar o marcar como inactivo
+          await client.query(
+            'UPDATE public.tracking_domains SET status = $1 WHERE id = $2',
+            ['failed', dbDomain.id]
+          );
+          removed++;
+        }
+      }
+
+      console.log(`✅ Sync completed: ${added} added, ${updated} updated, ${removed} marked as failed`);
+
+      return {
+        success: true,
+        added,
+        updated,
+        removed,
+        total: cloudflareHostnames.length
+      };
+    } catch (error) {
+      console.error('Error syncing with Cloudflare:', error);
       throw error;
     } finally {
       client.release();

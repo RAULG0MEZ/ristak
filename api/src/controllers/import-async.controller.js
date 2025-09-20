@@ -66,19 +66,17 @@ async function processChunk(chunk, type, jobId) {
         await processAppointment(item);
       }
       successful++;
+      job.successful = (job.successful || 0) + 1;
     } catch (error) {
       failed++;
+      job.failed = (job.failed || 0) + 1;
       if (!job.errors) job.errors = [];
       job.errors.push({ item, error: error.message });
     }
-    
+
     processed++;
-    
-    // Actualizar progreso
     job.processed += 1;
-    job.successful = (job.successful || 0) + (successful > 0 ? 1 : 0);
-    job.failed = (job.failed || 0) + (failed > 0 ? 1 : 0);
-    
+
     // Actualizar cada 10 registros
     if (processed % 10 === 0) {
       job.updatedAt = new Date().toISOString();
@@ -171,8 +169,8 @@ async function processPayment(payment) {
     const createdAt = payment.paymentDate
       ? (typeof payment.paymentDate === 'string' && payment.paymentDate.includes('T')
           ? payment.paymentDate
-          : new Date(payment.paymentDate))
-      : new Date();
+          : new Date(payment.paymentDate).toISOString())
+      : new Date().toISOString();
 
     await databasePool.query(
       `INSERT INTO contacts (
@@ -229,7 +227,7 @@ async function processPayment(payment) {
       payment.paymentMethod || 'unknown',  // $7 - payment_method
       payment.description || '',  // $8 - description
       payment.invoiceNumber || null,  // $9 - invoice_number
-      payment.paymentDate ? new Date(payment.paymentDate) : new Date()  // $10 - created_at
+      payment.paymentDate ? new Date(payment.paymentDate).toISOString() : new Date().toISOString()  // $10 - created_at
     ]
   );
 }
@@ -239,79 +237,100 @@ async function processAppointment(appointment) {
     throw new Error('ID de contacto es obligatorio');
   }
 
-  // Buscar por ID del CRM externo
-  const checkContact = await databasePool.query(
-    'SELECT contact_id FROM contacts WHERE ext_crm_id = $1',
-    [appointment.contactId]
-  );
+  try {
+    // Buscar por ID del CRM externo
+    const checkContact = await databasePool.query(
+      'SELECT contact_id FROM contacts WHERE ext_crm_id = $1',
+      [appointment.contactId]
+    );
 
-  let contactInternalId;
-  if (checkContact.rows.length === 0) {
-    // Crear contacto si no existe
-    contactInternalId = await generateContactId();
-    await databasePool.query(
-      `INSERT INTO contacts (
-        contact_id, ext_crm_id, email, first_name, last_name, phone, 
-        status, source, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
-      [
-        contactInternalId,
-        appointment.contactId,
-        appointment.email || null,
-        appointment.firstName || 'Unknown',
-        appointment.lastName || '',
-        appointment.phone || '',
-        'appointment_scheduled',
-        'appointment_import'
-      ]
-    );
-  } else {
-    contactInternalId = checkContact.rows[0].contact_id;
-    await databasePool.query(
-      `UPDATE contacts SET 
-        status = $1,
+    let contactInternalId;
+    if (checkContact.rows.length === 0) {
+      // Crear contacto si no existe
+      contactInternalId = await generateContactId();
+
+      await databasePool.query(
+        `INSERT INTO contacts (
+          contact_id, ext_crm_id, email, first_name, last_name, phone,
+          status, source, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
+        [
+          contactInternalId,
+          appointment.contactId,
+          appointment.email || null,
+          appointment.firstName || 'Unknown',
+          appointment.lastName || '',
+          appointment.phone || '',
+          'appointment_scheduled',
+          'appointment_import'
+        ]
+      );
+    } else {
+      contactInternalId = checkContact.rows[0].contact_id;
+      await databasePool.query(
+        `UPDATE contacts SET
+          status = $1,
+          updated_at = NOW()
+        WHERE contact_id = $2`,
+        [
+          'appointment_scheduled',
+          contactInternalId
+        ]
+      );
+    }
+
+    // Crear appointment con estructura correcta
+    const appointmentQuery = `
+      INSERT INTO appointments (
+        appointment_id, contact_id, title, description, location,
+        appointment_date, scheduled_at, duration, status, notes,
+        webhook_data, created_at, updated_at
+      ) VALUES (
+        gen_random_uuid()::text, $1, $2, $3, $4,
+        $5, $6, $7, $8, $9,
+        $10, NOW(), NOW()
+      )
+      ON CONFLICT (appointment_id) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        location = EXCLUDED.location,
+        appointment_date = EXCLUDED.appointment_date,
+        scheduled_at = EXCLUDED.scheduled_at,
+        duration = EXCLUDED.duration,
+        status = EXCLUDED.status,
+        notes = EXCLUDED.notes,
+        webhook_data = EXCLUDED.webhook_data,
         updated_at = NOW()
-      WHERE contact_id = $2`,
-      [
-        'appointment_scheduled',
-        contactInternalId
-      ]
-    );
+      RETURNING appointment_id
+    `;
+
+    // Preparar fechas - si no vienen, usar fecha actual en UTC
+    const now = new Date().toISOString();
+    const appointmentDate = appointment.appointmentDate ? new Date(appointment.appointmentDate).toISOString() : now;
+    const scheduledAt = appointment.scheduledAt ? new Date(appointment.scheduledAt).toISOString() : appointmentDate;
+
+    const result = await databasePool.query(appointmentQuery, [
+      contactInternalId, // $1 - contact_id
+      appointment.title || 'Cita importada', // $2 - title
+      appointment.description || null, // $3 - description
+      appointment.location || null, // $4 - location
+      appointmentDate, // $5 - appointment_date
+      scheduledAt, // $6 - scheduled_at
+      parseInt(appointment.duration) || 30, // $7 - duration
+      appointment.status || 'scheduled', // $8 - status
+      appointment.notes || null, // $9 - notes
+      JSON.stringify(appointment) // $10 - webhook_data (todos los datos originales)
+    ]);
+
+  } catch (error) {
+    throw error;
   }
-  
-  // Siempre crear registro en appointments
-  const appointmentId = appointment.appointmentId || crypto.randomBytes(8).toString('hex');
-  
-  await databasePool.query(
-    `INSERT INTO appointments (
-      id, contact_id, ext_crm_id, metadata, created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, NOW(), NOW())
-    ON CONFLICT (id) DO UPDATE SET
-      contact_id = EXCLUDED.contact_id,
-      ext_crm_id = EXCLUDED.ext_crm_id,
-      metadata = EXCLUDED.metadata,
-      updated_at = NOW()`,
-    [
-      appointmentId,
-      contactInternalId,
-      appointment.contactId, // ext_crm_id
-      JSON.stringify({
-        date: appointment.appointmentDate || null,
-        time: appointment.appointmentTime || null,
-        type: appointment.type || 'consultation',
-        status: appointment.status || 'scheduled',
-        duration: appointment.duration || null,
-        notes: appointment.notes || '',
-        location: appointment.location || null
-      })
-    ]
-  );
 }
 
 // Iniciar importación asíncrona
 async function startImport(req, res) {
   try {
-    const { data, type } = req.body;
+    const { data, type, timezone } = req.body;
     
     if (!data || !Array.isArray(data)) {
       return res.status(400).json({ 
@@ -332,6 +351,7 @@ async function startImport(req, res) {
     const job = {
       id: jobId,
       type,
+      timezone, // Guardar timezone usado en la importación (solo para referencia/auditoría)
       status: 'processing',
       total: data.length,
       processed: 0,

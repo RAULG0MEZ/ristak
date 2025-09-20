@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { getApiUrl } from '../config/api';
+import { getApiUrl, fetchWithAuth } from '../config/api';
+import { dateToApiString } from '../lib/dateUtils';
 
 interface Payment {
   id: string;
@@ -97,9 +98,12 @@ export function usePayments(options: UsePaymentsOptions = {}) {
         paymentsUrl = getApiUrl(`/payments?all=true&page=${actualPage}&limit=${actualLimit}`);
         // No metrics for all mode
       } else if (start && end) {
-        // Fetch with date filter
-        paymentsUrl = getApiUrl(`/payments?start=${start.toISOString()}&end=${end.toISOString()}&page=${actualPage}&limit=${actualLimit}`);
-        metricsUrl = getApiUrl(`/payments/metrics?start=${start.toISOString()}&end=${end.toISOString()}`);
+        // Formatear fechas como YYYY-MM-DD para evitar problemas de timezone
+        const startStr = dateToApiString(start);
+        const endStr = dateToApiString(end);
+
+        paymentsUrl = getApiUrl(`/payments?start=${startStr}&end=${endStr}&page=${actualPage}&limit=${actualLimit}`);
+        metricsUrl = getApiUrl(`/payments/metrics?start=${startStr}&end=${endStr}`);
       } else {
         // No data to fetch
         setPayments([]);
@@ -109,9 +113,9 @@ export function usePayments(options: UsePaymentsOptions = {}) {
         return;
       }
 
-      const promises: Promise<Response>[] = [fetch(paymentsUrl)];
+      const promises: Promise<Response>[] = [fetchWithAuth(paymentsUrl)];
       if (metricsUrl) {
-        promises.push(fetch(metricsUrl));
+        promises.push(fetchWithAuth(metricsUrl));
       }
 
       const responses = await Promise.all(promises);
@@ -151,7 +155,7 @@ export function usePayments(options: UsePaymentsOptions = {}) {
 
   const updatePayment = async (id: string, data: Partial<Payment>) => {
     try {
-      const response = await fetch(getApiUrl(`/payments/${id}`), {
+      const response = await fetchWithAuth(getApiUrl(`/payments/${id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -178,7 +182,7 @@ export function usePayments(options: UsePaymentsOptions = {}) {
     invoiceNumber?: string;
   }) => {
     try {
-      const response = await fetch(getApiUrl('/payments'), {
+      const response = await fetchWithAuth(getApiUrl('/payments'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -198,7 +202,7 @@ export function usePayments(options: UsePaymentsOptions = {}) {
 
   const deletePayment = async (id: string) => {
     try {
-      const response = await fetch(getApiUrl(`/payments/${id}`), {
+      const response = await fetchWithAuth(getApiUrl(`/payments/${id}`), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       });

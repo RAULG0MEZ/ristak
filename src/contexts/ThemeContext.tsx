@@ -16,9 +16,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     // Check local storage for saved theme preference
     const savedTheme = localStorage.getItem('theme') as ThemeMode
-    // Check system preference
-    const systemPreference = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-    return savedTheme || systemPreference
+    if (savedTheme) return savedTheme
+
+    // Auto-detect based on time of day
+    const hour = new Date().getHours()
+    // Dark mode from 7 PM to 7 AM
+    const isNightTime = hour >= 19 || hour < 7
+    return isNightTime ? 'dark' : 'light'
   })
 
   const setTheme = (newTheme: ThemeMode) => {

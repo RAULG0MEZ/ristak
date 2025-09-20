@@ -9,7 +9,7 @@ router.get('/stream', (req, res) => {
   // Only allow on localhost
   const host = req.hostname;
   const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
-  
+
   if (!isLocalhost) {
     return res.status(403).json({
       success: false,
@@ -36,8 +36,9 @@ router.get('/stream', (req, res) => {
   // NO hardcoded passwords! The script reads from .env.local
   // Make sure .env.local exists with proper credentials
 
-  // Spawn the deploy script with quick option (no SSL or cleanup for speed)
-  const child = spawn('bash', [scriptPath, '--quick'], {
+  // Spawn the deploy script WITHOUT --quick to ensure fresh build
+  // Quitamos --quick para que siempre haga build completo del frontend
+  const child = spawn('bash', [scriptPath], {
     env: process.env, // Use existing environment, script will read .env.local
     cwd: path.join(__dirname, '..', '..', '..') // Run from project root
   });

@@ -1,24 +1,11 @@
 import React from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Dot } from 'recharts'
 import { SmartRechartsTooltip } from '../../components/SmartRechartsTooltip'
 import { Card, ChartContainer } from '../../ui'
 import { Badge } from '../../ui'
 import { Icons } from '../../icons'
-
-const data = [
-  { month: 'Ene', income: 45, outcome: 28 },
-  { month: 'Feb', income: 52, outcome: 35 },
-  { month: 'Mar', income: 48, outcome: 42 },
-  { month: 'Abr', income: 35, outcome: 30 },
-  { month: 'May', income: 42, outcome: 25 },
-  { month: 'Jun', income: 38, outcome: 33 },
-  { month: 'Jul', income: 50, outcome: 28 },
-  { month: 'Ago', income: 45, outcome: 35 },
-  { month: 'Sep', income: 55, outcome: 30 },
-  { month: 'Oct', income: 42, outcome: 38 },
-  { month: 'Nov', income: 48, outcome: 32 },
-  { month: 'Dic', income: 52, outcome: 40 },
-]
+import { useHistoricalData } from '../../hooks/useHistoricalData'
+import { formatCurrency } from '../../lib/utils'
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -31,8 +18,13 @@ const CustomTooltip = ({ active, payload, label }: any) => {
               className="w-2 h-2 rounded-full"
               style={{ backgroundColor: entry.color }}
             />
-            <span className="text-secondary capitalize">{entry.dataKey}:</span>
-            <span className="text-primary font-medium">{entry.value}k</span>
+            <span className="text-secondary capitalize">
+              {entry.dataKey === 'income' ? 'Ingresos' :
+               entry.dataKey === 'expenses' ? 'Gastos' : 'Transacciones'}:
+            </span>
+            <span className="text-primary font-medium">
+              {entry.dataKey === 'transactions' ? entry.value : formatCurrency(entry.value)}
+            </span>
           </div>
         ))}
       </div>
@@ -42,6 +34,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 }
 
 export function MoneyFlowChart() {
+  const { data: historicalData, loading } = useHistoricalData()
+
+  // Usar los datos directamente sin transformación innecesaria
+  const data = historicalData
   return (
     <Card variant="glass" className="p-4">
       <div className="flex items-center justify-between mb-4">
@@ -61,36 +57,75 @@ export function MoneyFlowChart() {
         </Badge>
         <Badge variant="default">
           <span className="w-2 h-2 bg-accent-orange rounded-full mr-1.5" />
-          Egresos
+          Gastos
+        </Badge>
+        <Badge variant="default">
+          <span className="w-2 h-2 bg-accent-purple rounded-full mr-1.5" />
+          Transacciones
         </Badge>
       </div>
 
       <ChartContainer height={250}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-background-glassBorder)" opacity={0.5} />
+          <LineChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-background-glassBorder)" opacity={0.3} />
             <XAxis
               dataKey="month"
-              tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }}
+              tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
               axisLine={{ stroke: 'var(--color-background-glassBorder)' }}
+              angle={-45}
+              textAnchor="end"
+              height={60}
             />
             <YAxis
               tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }}
               axisLine={{ stroke: 'var(--color-background-glassBorder)' }}
-              tickFormatter={(value) => `${value}k`}
-              domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.4)]}
+              tickFormatter={(value) => value >= 1000 ? `${(value/1000).toFixed(0)}k` : value.toString()}
             />
             <SmartRechartsTooltip
               content={<CustomTooltip />}
-              cursor={false}
+              cursor={{ stroke: 'var(--color-text-secondary)', strokeWidth: 1 }}
               prefer="tr"
               offset={{ x: 0, y: 60 }}
               portalToBody
               allowEscapeViewBox={{ x: true, y: true }}
             />
-            <Bar dataKey="income" fill="var(--color-accent-blue)" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="outcome" fill="var(--color-accent-orange)" radius={[4, 4, 0, 0]} />
-          </BarChart>
+            <Line
+              type="monotone"
+              dataKey="income"
+              stroke="var(--color-accent-blue)"
+              strokeWidth={2.5}
+              dot={{ fill: 'var(--color-accent-blue)', strokeWidth: 2, r: 4 }}
+              activeDot={{ r: 6 }}
+              connectNulls={true}
+            />
+            <Line
+              type="monotone"
+              dataKey="expenses"
+              stroke="var(--color-accent-orange)"
+              strokeWidth={2.5}
+              dot={{ fill: 'var(--color-accent-orange)', strokeWidth: 2, r: 4 }}
+              activeDot={{ r: 6 }}
+              connectNulls={true}
+            />
+            <Line
+              type="monotone"
+              dataKey="transactions"
+              stroke="var(--color-accent-purple)"
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              dot={{ fill: 'var(--color-accent-purple)', strokeWidth: 1, r: 3 }}
+              activeDot={{ r: 5 }}
+              connectNulls={true}
+              yAxisId="right"
+            />
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
+              axisLine={{ stroke: 'var(--color-background-glassBorder)' }}
+            />
+          </LineChart>
         </ResponsiveContainer>
       </ChartContainer>
     </Card>

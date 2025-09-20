@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { formatCurrency } from '../lib/utils'
-import { getApiUrl } from '../config/api'
+import { getApiUrl, fetchWithAuth } from '../config/api'
+import { dateToApiString } from '../lib/dateUtils'
 
 export interface DateRange {
   start: Date
@@ -20,6 +21,8 @@ interface DashboardMetrics {
   leads: number
   qualified: number
   customers: number
+  hasTrackingData?: boolean
+  funnelType?: 'full' | 'simplified'
   trends: {
     netIncome: number
     adSpend: number
@@ -69,11 +72,11 @@ export function useDashboardMetrics(dateRange: DateRange): FormattedDashboardMet
         setError(null)
         
         // Fetch real data from API
-        // Format dates as YYYY-MM-DD for the API
-        const startDate = dateRange.start.toISOString().split('T')[0]
-        const endDate = dateRange.end.toISOString().split('T')[0]
+        // Formatear fechas usando UTC para evitar problemas de timezone
+        const startDate = dateToApiString(dateRange.start);
+        const endDate = dateToApiString(dateRange.end);
 
-        const response = await fetch(
+        const response = await fetchWithAuth(
           getApiUrl(`/dashboard/metrics?start=${startDate}&end=${endDate}`)
         )
         
@@ -153,36 +156,64 @@ export function useDashboardMetrics(dateRange: DateRange): FormattedDashboardMet
     }
   ] : []
 
-  const funnelData = metrics ? [
-    {
-      stage: 'Visitantes',
-      value: metrics.visitors,
-      icon: 'mousePointer',
-      color: 'from-accent-blue to-accent-purple',
-      bgColor: 'bg-accent-blue/10'
-    },
-    {
-      stage: 'Leads',
-      value: metrics.leads,
-      icon: 'userPlus',
-      color: 'from-indigo-400 to-indigo-600',
-      bgColor: 'bg-indigo-500/10'
-    },
-    {
-      stage: 'Citas',
-      value: metrics.qualified,
-      icon: 'calendar',
-      color: 'from-purple-400 to-purple-600',
-      bgColor: 'bg-purple-500/10'
-    },
-    {
-      stage: 'Ventas',
-      value: metrics.customers,
-      icon: 'shoppingCart',
-      color: 'from-green-400 to-green-600',
-      bgColor: 'bg-green-500/10'
-    }
-  ] : []
+  // Construir el embudo dinámicamente basado en si hay datos de tracking
+  const funnelData = metrics ? (
+    // Si hay datos de tracking, mostrar embudo completo con visitantes
+    metrics.hasTrackingData ? [
+      {
+        stage: 'Visitantes',
+        value: metrics.visitors,
+        icon: 'mousePointer',
+        color: 'from-accent-blue to-accent-purple',
+        bgColor: 'bg-accent-blue/10'
+      },
+      {
+        stage: 'Leads',
+        value: metrics.leads,
+        icon: 'userPlus',
+        color: 'from-indigo-400 to-indigo-600',
+        bgColor: 'bg-indigo-500/10'
+      },
+      {
+        stage: 'Citas',
+        value: metrics.qualified,
+        icon: 'calendar',
+        color: 'from-purple-400 to-purple-600',
+        bgColor: 'bg-purple-500/10'
+      },
+      {
+        stage: 'Ventas',
+        value: metrics.customers,
+        icon: 'shoppingCart',
+        color: 'from-green-400 to-green-600',
+        bgColor: 'bg-green-500/10'
+      }
+    ] :
+    // Si NO hay datos de tracking, embudo simplificado sin visitantes
+    [
+      {
+        stage: 'Leads',
+        value: metrics.leads,
+        icon: 'userPlus',
+        color: 'from-accent-blue to-accent-purple',
+        bgColor: 'bg-accent-blue/10'
+      },
+      {
+        stage: 'Citas',
+        value: metrics.qualified,
+        icon: 'calendar',
+        color: 'from-indigo-400 to-indigo-600',
+        bgColor: 'bg-indigo-500/10'
+      },
+      {
+        stage: 'Ventas',
+        value: metrics.customers,
+        icon: 'shoppingCart',
+        color: 'from-green-400 to-green-600',
+        bgColor: 'bg-green-500/10'
+      }
+    ]
+  ) : []
 
   return {
     financialMetrics,

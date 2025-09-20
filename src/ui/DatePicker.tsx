@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import ReactDOM from 'react-dom'
 import { cn } from '../lib/utils'
+import { getCurrentYear, dateToApiString, parseUTCDate, createDateInTimezone } from '../lib/dateUtils'
 import { Icons } from '../icons'
 
 interface DatePickerProps {
@@ -47,8 +48,8 @@ export function DatePicker({
   const [selectedDate, setSelectedDate] = useState<Date | null>(
     value ? new Date(value) : null
   )
-  const [currentMonth, setCurrentMonth] = useState(() => 
-    selectedDate ? startOfMonth(selectedDate) : startOfMonth(new Date())
+  const [currentMonth, setCurrentMonth] = useState(() =>
+    selectedDate ? startOfMonth(selectedDate) : startOfMonth(createDateInTimezone())
   )
   const [showYearMonth, setShowYearMonth] = useState(true)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -90,7 +91,8 @@ export function DatePicker({
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date)
-    onChange(date.toISOString().slice(0, 10))
+    // Usar dateToApiString para mantener la fecha correcta sin cambio de día
+    onChange(dateToApiString(date))
     setIsOpen(false)
   }
 
@@ -128,7 +130,7 @@ export function DatePicker({
           {days.map((day, idx) => {
             const isCurrentMonth = day.getMonth() === currentMonth.getMonth()
             const isSelected = selectedDate && day.toDateString() === selectedDate.toDateString()
-            const isToday = day.toDateString() === new Date().toDateString()
+            const isToday = day.toDateString() === createDateInTimezone().toDateString()
             const isDisabled = !isCurrentMonth || 
               (minDateObj && day < minDateObj) || 
               (maxDateObj && day > maxDateObj)
@@ -261,7 +263,7 @@ export function DatePicker({
                       className="w-full px-2 py-2 bg-secondary dark:bg-primary/10 text-primary rounded-lg border border-primary dark:border-glassBorder text-sm font-medium focus:outline-none focus:border-accent-blue cursor-pointer hover:bg-glass-subtle transition-colors"
                     >
                   {(() => {
-                    const currentYear = new Date().getFullYear()
+                    const currentYear = getCurrentYear()
                     const minYear = minDateObj ? minDateObj.getFullYear() : currentYear - 5
                     const maxYear = maxDateObj ? maxDateObj.getFullYear() : currentYear
                     const years = []

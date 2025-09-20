@@ -2,49 +2,17 @@ import React from 'react'
 import { Card } from '../../ui'
 import { Icons } from '../../icons'
 import { useDateRange } from '../../contexts/DateContext'
-import { useDashboardMetrics } from '../../hooks/useDashboardMetrics'
+import { useFunnelData } from '../../hooks/useFunnelData'
 
 export function FunnelChart() {
   const { dateRange } = useDateRange()
-  const { funnelData, loading } = useDashboardMetrics({
-    start: dateRange.start,
-    end: dateRange.end
-  })
-  
-  // Usar datos reales si están disponibles, si no usar datos por defecto
-  const defaultData = [
-    { 
-      stage: 'Visitantes', 
-      value: 0, 
-      icon: Icons.mousePointer
-    },
-    { 
-      stage: 'Leads', 
-      value: 0, 
-      icon: Icons.userPlus
-    },
-    { 
-      stage: 'Citas', 
-      value: 0, 
-      icon: Icons.calendar
-    },
-    { 
-      stage: 'Ventas', 
-      value: 0, 
-      icon: Icons.shoppingCart
-    },
-  ]
-  
-  const data = funnelData.length > 0 ? funnelData.map((item, index) => {
-    const defaultItem = defaultData[index] || defaultData[0]
-    return {
-      ...item,
-      icon: Icons[item.icon as keyof typeof Icons] || defaultItem.icon
-    }
-  }) : defaultData
-  
-  const maxValue = Math.max(...data.map(d => d.value), 1) // Evitar división por 0
-  const totalConversion = data[0].value > 0 
+  const { data: funnelData, loading } = useFunnelData(dateRange)
+
+  // Usar los datos del hook directamente (ya vienen adaptados)
+  const data = funnelData
+
+  const maxValue = data.length > 0 ? Math.max(...data.map(d => d.value), 1) : 1 // Evitar división por 0
+  const totalConversion = data.length > 0 && data[0].value > 0
     ? ((data[data.length - 1].value / data[0].value) * 100).toFixed(1)
     : '0'
   

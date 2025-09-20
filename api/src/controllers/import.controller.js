@@ -42,7 +42,7 @@ async function generateContactId() {
 // Importar contactos
 async function importContacts(req, res) {
   try {
-    const { data } = req.body;
+    const { data, timezone } = req.body; // Recibir timezone usado en importación (solo para referencia)
     
     
     if (!data || !Array.isArray(data)) {
@@ -353,11 +353,15 @@ async function importPayments(req, res) {
 async function importAppointments(req, res) {
   try {
     const { data } = req.body;
-    
+
+    // DEBUG: Ver exactamente qué datos llegan
+    console.log('[Import Appointments] Datos recibidos:', JSON.stringify(req.body, null, 2));
+    console.log('[Import Appointments] Total registros:', data ? data.length : 0);
+
     if (!data || !Array.isArray(data)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Datos inválidos',
-        message: 'Se esperaba un array de citas' 
+        message: 'Se esperaba un array de citas'
       });
     }
 
@@ -479,37 +483,75 @@ async function importAppointments(req, res) {
           });
         }
         
-        // Siempre crear registro de appointment
+        // Siempre crear registro de appointment con la estructura correcta
         try {
-          const appointmentId = appointment.appointmentId || crypto.randomBytes(8).toString('hex');
-          
-          await databasePool.query(
-            `INSERT INTO appointments (
-              id, contact_id, ext_crm_id, metadata, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, NOW(), NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              contact_id = EXCLUDED.contact_id,
-              ext_crm_id = EXCLUDED.ext_crm_id,
-              metadata = EXCLUDED.metadata,
-              updated_at = NOW()`,
-            [
-              appointmentId,
-              contactInternalId,
-              appointment.contactId, // ext_crm_id del appointment
-              JSON.stringify({
-                date: appointment.appointmentDate || null,
-                type: appointment.type || 'consultation',
-                status: appointment.status || 'scheduled',
-                notes: appointment.notes || '',
-                time: appointment.appointmentTime || null,
-                duration: appointment.duration || null,
-                location: appointment.location || null
-              })
-            ]
-          );
-          newAppointments++;
+          // Procesar fecha y hora de la cita
+          let appointmentDate = null;
+          let scheduledAt = null;
+
+          if (appointment.appointmentDate) {
+            const dateValue = appointment.appointmentDate;
+            if (typeof dateValue === 'string' && dateValue.includes('T')) {
+              appointmentDate = new Date(dateValue);
+            } else {
+              appointmentDate = new Date(dateValue);
+            }
+
+            // Si hay hora separada, combinarla con la fecha
+            if (appointment.appointmentTime) {
+              const timeParts = appointment.appointmentTime.split(':');
+              if (timeParts.length >= 2) {
+                appointmentDate.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]));
+              }
+            }
+            // Convertir a UTC después de procesar todo
+            appointmentDate = appointmentDate.toISOString();
+            scheduledAt = appointmentDate;
+          } else {
+            // Si no hay fecha, usar la fecha actual en UTC
+            const now = new Date().toISOString();
+            appointmentDate = now;
+            scheduledAt = now;
+          }
+
+          const appointmentQuery = `
+            INSERT INTO appointments (
+              appointment_id, contact_id, title, description, location,
+              appointment_date, scheduled_at, duration, status, notes,
+              webhook_data, created_at, updated_at
+            ) VALUES (
+              gen_random_uuid()::text, $1, $2, $3, $4,
+              $5, $6, $7, $8, $9,
+              $10, NOW(), NOW()
+            )
+            ON CONFLICT (appointment_id) DO NOTHING
+            RETURNING appointment_id`;
+
+          const appointmentResult = await databasePool.query(appointmentQuery, [
+            contactInternalId, // $1 - contact_id interno
+            'Cita importada desde CSV', // $2 - title
+            null, // $3 - description
+            appointment.location || null, // $4 - location
+            appointmentDate, // $5 - appointment_date
+            scheduledAt, // $6 - scheduled_at
+            parseInt(appointment.duration) || 30, // $7 - duration
+            appointment.status || 'scheduled', // $8 - status
+            appointment.notes || null, // $9 - notes
+            JSON.stringify({ // $10 - webhook_data
+              ext_crm_id: appointment.contactId,
+              original_data: appointment,
+              imported_at: new Date().toISOString(),
+              source: 'csv_import'
+            })
+          ]);
+
+          if (appointmentResult.rows.length > 0) {
+            newAppointments++;
+            console.log('Appointment creado con ID:', appointmentResult.rows[0].appointment_id);
+          }
         } catch (appError) {
-          // Error creando appointment record
+          console.error('Error creando appointment:', appError.message);
+          // No lanzar error, solo registrar y continuar
         }
         
         processed++;

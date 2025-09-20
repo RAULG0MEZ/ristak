@@ -1,4 +1,5 @@
 const { databasePool } = require('../config/database.config');
+const { checkMetaAdsTableExists, queryMetaAdsIfExists } = require('../utils/meta-helper');
 
 class ReportsService {
   async getMetrics(startDate, endDate, groupBy = 'month') {
@@ -6,19 +7,42 @@ class ReportsService {
     // Sin filtros de atribución - incluye TODOS los contactos
     const unit = ['day', 'month', 'year'].includes(groupBy) ? groupBy : 'month'
     try {
+      // Check if meta_ads table exists first
+      let adsPromise;
+      try {
+        const checkAds = await databasePool.query(
+          `SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'meta'
+            AND table_name = 'meta_ads'
+          )`
+        );
+        const hasAdsTable = checkAds.rows[0].exists;
+
+        if (hasAdsTable) {
+          adsPromise = databasePool.query(
+            `SELECT DATE_TRUNC($3, date) AS period,
+                    COALESCE(SUM(spend),0)   AS spend,
+                    COALESCE(SUM(reach),0)   AS reach,
+                    COALESCE(SUM(clicks),0)  AS clicks
+             FROM meta.meta_ads
+             WHERE date >= $1 AND date <= $2
+             GROUP BY period
+             ORDER BY period`,
+            [startDate, endDate, unit]
+          );
+        } else {
+          // Return empty result if table doesn't exist
+          adsPromise = Promise.resolve({ rows: [] });
+        }
+      } catch (e) {
+        // If error checking, return empty result
+        adsPromise = Promise.resolve({ rows: [] });
+      }
+
       // Parallel queries by source
       const [ads, sessions, contacts, appointments, payments, newCustomers] = await Promise.all([
-        databasePool.query(
-          `SELECT DATE_TRUNC($3, date) AS period,
-                  COALESCE(SUM(spend),0)   AS spend,
-                  COALESCE(SUM(reach),0)   AS reach,
-                  COALESCE(SUM(clicks),0)  AS clicks
-           FROM meta.meta_ads
-           WHERE date >= $1 AND date <= $2
-           GROUP BY period
-           ORDER BY period`,
-          [startDate, endDate, unit]
-        ),
+        adsPromise,
         // Visitors - TRACKING NO IMPLEMENTADO AÚN
         // Por ahora retornamos 0 visitantes hasta implementar tracking
         databasePool.query(
@@ -176,9 +200,12 @@ class ReportsService {
     // Usa Last Attribution - TODO se basa en la fecha de creación del contacto
     const unit = ['day', 'month', 'year'].includes(groupBy) ? groupBy : 'month'
     try {
+      // Check if meta_ads table exists
+      const hasAdsTable = await checkMetaAdsTableExists();
+
       const [ads, sessions, contacts, appointments, payments, newCustomers] = await Promise.all([
-        // Gastos de Meta Ads
-        databasePool.query(
+        // Gastos de Meta Ads - use helper
+        queryMetaAdsIfExists(
           `SELECT DATE_TRUNC($3, date) AS period,
                   COALESCE(SUM(spend),0) AS spend,
                   COALESCE(SUM(reach),0) AS reach,
@@ -406,13 +433,13 @@ class ReportsService {
   }
 
   // MÉTODOS PARA DETALLES DE REPORTES
-  
+
   // Obtener ventas detalladas (TODOS) - Agrupado por cliente con total acumulado
   async getSalesDetails(startDate, endDate) {
     try {
       const result = await databasePool.query(`
         WITH client_sales AS (
-          SELECT 
+          SELECT
             c.contact_id,
             c.first_name,
             c.last_name,
@@ -434,7 +461,7 @@ class ReportsService {
           FROM contacts c
           INNER JOIN payments p ON c.contact_id = p.contact_id
           WHERE p.status = 'completed'
-            AND COALESCE(p.paid_at, p.created_at) >= $1 
+            AND COALESCE(p.paid_at, p.created_at) >= $1
             AND COALESCE(p.paid_at, p.created_at) <= $2
           GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.attribution_ad_id, c.created_at
         )
@@ -548,7 +575,7 @@ class ReportsService {
   async getLeadsDetails(startDate, endDate) {
     try {
       const result = await databasePool.query(`
-        SELECT 
+        SELECT
           contact_id,
           first_name,
           last_name,
@@ -573,7 +600,7 @@ class ReportsService {
   async getLeadsDetailsAttributed(startDate, endDate) {
     try {
       const result = await databasePool.query(`
-        SELECT 
+        SELECT
           c.contact_id,
           c.first_name,
           c.last_name,
@@ -611,7 +638,7 @@ class ReportsService {
   async getAppointmentsDetails(startDate, endDate) {
     try {
       const result = await databasePool.query(`
-        SELECT 
+        SELECT
           a.id,
           a.contact_id,
           a.created_at,
@@ -652,7 +679,7 @@ class ReportsService {
   async getAppointmentsDetailsAttributed(startDate, endDate) {
     try {
       const result = await databasePool.query(`
-        SELECT 
+        SELECT
           a.id,
           a.contact_id,
           a.created_at,
@@ -707,7 +734,7 @@ class ReportsService {
     try {
       const result = await databasePool.query(`
         WITH first_payments AS (
-          SELECT 
+          SELECT
             c.contact_id,
             c.first_name,
             c.last_name,
@@ -722,7 +749,7 @@ class ReportsService {
           INNER JOIN payments p ON c.contact_id = p.contact_id
           WHERE p.status = 'completed'
           GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.attribution_ad_id, c.created_at
-          HAVING MIN(COALESCE(p.paid_at, p.created_at)) >= $1 
+          HAVING MIN(COALESCE(p.paid_at, p.created_at)) >= $1
             AND MIN(COALESCE(p.paid_at, p.created_at)) <= $2
         )
         SELECT * FROM first_payments
@@ -753,7 +780,7 @@ class ReportsService {
     try {
       const result = await databasePool.query(`
         WITH attributed_customers AS (
-          SELECT 
+          SELECT
             c.contact_id,
             c.first_name,
             c.last_name,
@@ -803,6 +830,97 @@ class ReportsService {
     } catch (error) {
       console.error('Error getting attributed new customers details:', error)
       throw error
+    }
+  }
+
+  // Summary metrics for reports with trends
+  async getReportsMetrics(startDate, endDate) {
+    try {
+      // Calculate the previous period for comparison
+      const periodLength = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+      const previousEndDate = new Date(startDate);
+      previousEndDate.setDate(previousEndDate.getDate() - 1);
+      const previousStartDate = new Date(previousEndDate);
+      previousStartDate.setDate(previousStartDate.getDate() - periodLength + 1);
+
+      // Query for current period metrics
+      const currentMetricsQuery = `
+        WITH revenue_stats AS (
+          SELECT
+            COALESCE(SUM(amount), 0) as total_revenue
+          FROM payments
+          WHERE COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2 AND status = 'completed'
+        ),
+        expense_stats AS (
+          SELECT
+            COALESCE(SUM(spend), 0) as total_spend
+          FROM meta.meta_ads
+          WHERE date >= $1 AND date <= $2
+        ),
+        customer_stats AS (
+          SELECT
+            COUNT(DISTINCT p.contact_id) as new_customers
+          FROM payments p
+          WHERE COALESCE(p.paid_at, p.created_at) >= $1 AND COALESCE(p.paid_at, p.created_at) <= $2 AND p.status = 'completed'
+        ),
+        lead_stats AS (
+          SELECT
+            COUNT(*) as total_leads
+          FROM contacts
+          WHERE created_at >= $1 AND created_at <= $2
+        )
+        SELECT
+          r.total_revenue,
+          e.total_spend,
+          c.new_customers,
+          l.total_leads,
+          CASE
+            WHEN e.total_spend > 0 THEN r.total_revenue / e.total_spend
+            ELSE 0
+          END as roas,
+          CASE
+            WHEN c.new_customers > 0 THEN r.total_revenue / c.new_customers
+            ELSE 0
+          END as avg_revenue_per_customer
+        FROM revenue_stats r, expense_stats e, customer_stats c, lead_stats l
+      `;
+
+      // Query for previous period metrics (same structure)
+      const previousMetricsQuery = currentMetricsQuery;
+
+      const [currentResult, previousResult] = await Promise.all([
+        databasePool.query(currentMetricsQuery, [startDate, endDate]),
+        databasePool.query(previousMetricsQuery, [previousStartDate, previousEndDate])
+      ]);
+
+      const current = currentResult.rows[0];
+      const previous = previousResult.rows[0];
+
+      // Calculate percentage changes
+      const calculateChange = (current, previous) => {
+        if (!previous || previous === 0) return current > 0 ? 100 : 0;
+        return ((current - previous) / Math.abs(previous)) * 100;
+      };
+
+      return {
+        totalRevenue: parseFloat(current.total_revenue) || 0,
+        totalSpend: parseFloat(current.total_spend) || 0,
+        newCustomers: parseInt(current.new_customers) || 0,
+        totalLeads: parseInt(current.total_leads) || 0,
+        roas: parseFloat(current.roas) || 0,
+        avgRevenuePerCustomer: parseFloat(current.avg_revenue_per_customer) || 0,
+        trends: {
+          totalRevenue: calculateChange(current.total_revenue, previous.total_revenue),
+          totalSpend: calculateChange(current.total_spend, previous.total_spend),
+          newCustomers: calculateChange(current.new_customers, previous.new_customers),
+          totalLeads: calculateChange(current.total_leads, previous.total_leads),
+          roas: calculateChange(current.roas, previous.roas),
+          avgRevenuePerCustomer: calculateChange(current.avg_revenue_per_customer, previous.avg_revenue_per_customer)
+        }
+      };
+    } catch (error) {
+      console.error('Error getting reports metrics:', error);
+      throw error;
     }
   }
 }

@@ -3,10 +3,14 @@ import { Icons } from '../../icons'
 import { Button } from '../../ui'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../contexts/AuthContext'
+import { LogOut } from 'lucide-react'
 
 export function Header() {
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const { logout, accountName } = useAuth()
+  const isProduction = process.env.NODE_ENV === 'production' && window.location.hostname !== 'localhost'
   
   return (
     <header className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-primary">
@@ -22,9 +26,15 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-1 sm:gap-3">
-        <Button 
-          variant="ghost" 
-          size="sm" 
+        {isProduction && accountName && (
+          <div className="hidden sm:flex items-center gap-2 mr-2 px-3 py-1 rounded-lg bg-glass border border-glassBorder">
+            <span className="text-sm text-muted">{accountName}</span>
+          </div>
+        )}
+
+        <Button
+          variant="ghost"
+          size="sm"
           className="p-1.5 sm:p-2"
           onClick={toggleTheme}
         >
@@ -34,9 +44,9 @@ export function Header() {
             <Icons.sun className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
           )}
         </Button>
-        <Button 
-          variant="ghost" 
-          size="sm" 
+        <Button
+          variant="ghost"
+          size="sm"
           className="p-1.5 sm:p-2"
           onClick={() => navigate('/settings')}
         >
@@ -46,6 +56,18 @@ export function Header() {
           <Icons.notification className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
           <span className="absolute top-0.5 right-0.5 sm:top-1 sm:right-1 w-1.5 h-1.5 sm:w-2 sm:h-2 bg-accent-red rounded-full"></span>
         </Button>
+
+        {isProduction && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="p-1.5 sm:p-2 text-red-500 hover:text-red-600"
+            onClick={logout}
+            title="Cerrar sesión"
+          >
+            <LogOut className="w-4 h-4 sm:w-5 sm:h-5" />
+          </Button>
+        )}
       </div>
     </header>
   )

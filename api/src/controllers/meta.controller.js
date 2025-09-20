@@ -16,6 +16,7 @@ async function oauthCallback(req, res) {
   try {
     const { code } = req.query
     if (!code) return res.status(400).send('Missing code')
+
     await metaService.exchangeCodeForToken(code)
     // Return a simple page that notifies opener and closes the popup
     res.set('Content-Type', 'text/html')
@@ -73,6 +74,7 @@ async function configure(req, res) {
     if (!adAccountId || !pixelId || !sinceDate || !schedule) {
       return res.status(400).json({ error: { code: 'validation_error', message: 'Missing required fields' } })
     }
+
     // Configure will now handle clearing DB, scheduling, and initial sync
     await metaService.configure({ adAccountId, adAccountName, pixelId, pixelName, sinceDate, schedule })
     res.status(202).json({ ok: true })
@@ -131,4 +133,3 @@ module.exports = {
   disconnect,
   initSchema,
 }
-

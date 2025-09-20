@@ -17,14 +17,16 @@ class CloudflareService {
   makeRequest(method, path, body = null) {
     return new Promise((resolve, reject) => {
       const url = new URL(`${this.baseUrl}${path}`);
+      const requestPath = `${url.pathname}${url.search || ''}`;
 
       const options = {
         hostname: url.hostname,
-        path: url.pathname,
+        path: requestPath,
         method: method,
         headers: {
           'Authorization': `Bearer ${this.apiToken}`,
-          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
         }
       };
 
@@ -38,6 +40,12 @@ class CloudflareService {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
+            if (res.statusCode && res.statusCode >= 400) {
+              const error = new Error(parsed.errors?.[0]?.message || `Cloudflare API error (${res.statusCode})`);
+              error.statusCode = res.statusCode;
+              error.response = parsed;
+              return reject(error);
+            }
             resolve(parsed);
           } catch (e) {
             reject(new Error('Invalid JSON response from Cloudflare'));
@@ -187,6 +195,8 @@ class CloudflareService {
             tls_1_3: 'on'
           }
         }
+        // NOTA: custom_origin_server y custom_origin_sni requieren plan Enterprise
+        // Para planes normales, Cloudflare usa el dominio de la zona por defecto
       });
 
       if (!data.success) {
@@ -323,6 +333,63 @@ class CloudflareService {
       return data.success;
     } catch (error) {
       console.error('Error deleting custom hostname:', error);
+      throw error;
+    }
+  }
+
+  // Listar todos los custom hostnames de la zona
+  async listCustomHostnames(page = 1, perPage = 100) {
+    try {
+      const url = `/zones/${this.zoneId}/custom_hostnames?page=${page}&per_page=${perPage}`;
+      const data = await this.makeRequest('GET', url);
+
+      if (!data.success) {
+        throw new Error('Failed to list custom hostnames');
+      }
+
+      // Mapear los resultados a un formato simple
+      const hostnames = data.result.map(hostname => ({
+        id: hostname.id,
+        hostname: hostname.hostname,
+        status: hostname.status,
+        sslStatus: hostname.ssl?.status,
+        createdAt: hostname.created_at,
+        verificationErrors: hostname.verification_errors || [],
+        isActive: hostname.status === 'active' && hostname.ssl?.status === 'active'
+      }));
+
+      return {
+        hostnames,
+        totalCount: data.result_info?.total_count || hostnames.length,
+        page: data.result_info?.page || 1,
+        perPage: data.result_info?.per_page || perPage,
+        totalPages: data.result_info?.total_pages || 1
+      };
+    } catch (error) {
+      console.error('Error listing custom hostnames:', error);
+      throw error;
+    }
+  }
+
+  // Obtener TODOS los custom hostnames (maneja paginación automáticamente)
+  async getAllCustomHostnames() {
+    try {
+      const allHostnames = [];
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const result = await this.listCustomHostnames(page, 100);
+        allHostnames.push(...result.hostnames);
+
+        hasMore = page < result.totalPages;
+        page++;
+      }
+
+      console.log(`✅ Found ${allHostnames.length} custom hostnames in Cloudflare`);
+      return allHostnames;
+    } catch (error) {
+      console.error('Error getting all custom hostnames:', error);
       throw error;
     }
   }

@@ -1,11 +1,18 @@
 const paymentsService = require('../services/payments.service');
-const paymentsMetricsService = require('../services/payments.metrics.service');
 
 async function getPayments(req, res) {
   try {
-    const { start, end, page = 1, limit = 50, all = 'false' } = req.query;
-    // Obtener tenant IDs del middleware
-    const { accountId, subaccountId } = req;
+    const { start, end, page = 1, limit = 50, all = 'false', contact_id } = req.query;
+
+    // Si se especifica contact_id, devolver pagos de ese contacto específico
+    if (contact_id) {
+      const result = await paymentsService.getPaymentsByContactId(contact_id);
+
+      return res.json({
+        success: true,
+        data: result
+      });
+    }
 
     // Si all=true, no requiere fechas y trae todos los pagos con paginación
     if (all === 'true') {
@@ -13,7 +20,7 @@ async function getPayments(req, res) {
       const limitNum = parseInt(limit);
       const offset = (pageNum - 1) * limitNum;
 
-      const result = await paymentsService.getPaymentsPaginated(offset, limitNum, accountId, subaccountId);
+      const result = await paymentsService.getPaymentsPaginated(offset, limitNum);
 
       res.json({
         success: true,
@@ -37,7 +44,7 @@ async function getPayments(req, res) {
       const limitNum = parseInt(limit);
       const offset = (pageNum - 1) * limitNum;
 
-      const result = await paymentsService.getPaymentsWithPagination(startDate, endDate, offset, limitNum, accountId, subaccountId);
+      const result = await paymentsService.getPaymentsWithPagination(startDate, endDate, offset, limitNum);
 
       res.json({
         success: true,
@@ -60,7 +67,6 @@ async function getPayments(req, res) {
 async function getPaymentMetrics(req, res) {
   try {
     const { start, end } = req.query;
-    const { accountId, subaccountId } = req;
 
     if (!start || !end) {
       return res.status(400).json({
@@ -71,17 +77,8 @@ async function getPaymentMetrics(req, res) {
     const startDate = new Date(start);
     const endDate = new Date(end);
 
-    // Get both old metrics and new metrics with trends
-    const [oldMetrics, metricsWithTrends] = await Promise.all([
-      paymentsService.getPaymentMetrics(startDate, endDate, accountId, subaccountId),
-      paymentsMetricsService.getPaymentsMetrics(startDate, endDate, accountId, subaccountId)
-    ]);
-
-    // Combine both responses
-    const combinedMetrics = {
-      ...oldMetrics,
-      trends: metricsWithTrends.trends
-    };
+    // Get payment metrics (ya consolidado con trends)
+    const combinedMetrics = await paymentsService.getPaymentMetrics(startDate, endDate);
 
     res.json({
       success: true,
@@ -100,9 +97,8 @@ async function updatePayment(req, res) {
   try {
     const { id } = req.params;
     const updateData = req.body;
-    const { accountId, subaccountId } = req;
 
-    const updatedPayment = await paymentsService.updatePayment(id, updateData, accountId, subaccountId);
+    const updatedPayment = await paymentsService.updatePayment(id, updateData);
 
     if (!updatedPayment) {
       return res.status(404).json({
@@ -135,7 +131,6 @@ async function updatePayment(req, res) {
 async function createPayment(req, res) {
   try {
     const paymentData = req.body;
-    const { accountId, subaccountId } = req;
 
     // Validar campos requeridos
     if (!paymentData.contactId || !paymentData.amount || !paymentData.date) {
@@ -145,7 +140,7 @@ async function createPayment(req, res) {
       });
     }
 
-    const newPayment = await paymentsService.createPayment(paymentData, accountId, subaccountId);
+    const newPayment = await paymentsService.createPayment(paymentData);
 
     res.status(201).json({
       success: true,
@@ -165,9 +160,8 @@ async function createPayment(req, res) {
 async function deletePayment(req, res) {
   try {
     const { id } = req.params;
-    const { accountId, subaccountId } = req;
 
-    const result = await paymentsService.deletePayment(id, accountId, subaccountId);
+    const result = await paymentsService.deletePayment(id);
     
     if (!result) {
       return res.status(404).json({

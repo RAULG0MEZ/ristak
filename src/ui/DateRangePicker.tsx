@@ -3,6 +3,7 @@ import { cn } from '../lib/utils'
 import { Icons } from '../icons'
 import { Button } from './Button'
 import { useDateRange, startOfMonth, endOfMonth } from '../contexts/DateContext'
+import { createDateInTimezone } from '../lib/dateUtils'
 
 interface DateRangePickerProps {
   className?: string
@@ -19,35 +20,53 @@ const formatDate = (date: Date): string => {
 }
 
 const startOfWeek = (date: Date): Date => {
+  // Usar fecha local para cálculos de UI
   const result = new Date(date)
   const day = result.getDay()
   const diff = result.getDate() - day + (day === 0 ? -6 : 1)
   result.setDate(diff)
-  result.setHours(0, 0, 0, 0)
-  return result
+  // Crear fecha en timezone configurado para inicio del día
+  return createDateInTimezone(
+    result.getFullYear(),
+    result.getMonth(),
+    result.getDate(),
+    0, 0
+  )
 }
 
 const endOfWeek = (date: Date): Date => {
+  // Usar fecha local para cálculos de UI
   const result = new Date(date)
   const day = result.getDay()
   const diff = result.getDate() - day + (day === 0 ? 0 : 7)
   result.setDate(diff)
-  result.setHours(23, 59, 59, 999)
-  return result
+  // Crear fecha en timezone configurado para fin del día
+  return createDateInTimezone(
+    result.getFullYear(),
+    result.getMonth(),
+    result.getDate(),
+    23, 59
+  )
 }
 
 const startOfYear = (date: Date): Date => {
-  const result = new Date(date)
-  result.setMonth(0, 1)
-  result.setHours(0, 0, 0, 0)
-  return result
+  // Crear fecha en timezone configurado para inicio del año
+  return createDateInTimezone(
+    date.getFullYear(),
+    0, // Enero
+    1, // Día 1
+    0, 0
+  )
 }
 
 const endOfYear = (date: Date): Date => {
-  const result = new Date(date)
-  result.setMonth(11, 31)
-  result.setHours(23, 59, 59, 999)
-  return result
+  // Crear fecha en timezone configurado para fin del año
+  return createDateInTimezone(
+    date.getFullYear(),
+    11, // Diciembre
+    31, // Día 31
+    23, 59
+  )
 }
 
 const subDays = (date: Date, days: number): Date => {
@@ -69,50 +88,56 @@ export function DateRangePicker({ className }: DateRangePickerProps) {
     {
       label: 'Hoy',
       getValue: () => {
-        const today = new Date()
+        const today = createDateInTimezone()
         return { start: today, end: today }
       }
     },
     {
       label: 'Ayer',
       getValue: () => {
-        const yesterday = subDays(new Date(), 1)
+        const yesterday = subDays(createDateInTimezone(), 1)
         return { start: yesterday, end: yesterday }
       }
     },
     {
       label: 'Últimos 7 días',
       getValue: () => ({
-        start: subDays(new Date(), 6),
-        end: new Date()
+        start: subDays(createDateInTimezone(), 6),
+        end: createDateInTimezone()
       })
     },
     {
       label: 'Últimos 30 días',
       getValue: () => ({
-        start: subDays(new Date(), 29),
-        end: new Date()
+        start: subDays(createDateInTimezone(), 29),
+        end: createDateInTimezone()
       })
     },
     {
       label: 'Esta semana',
       getValue: () => ({
-        start: startOfWeek(new Date()),
-        end: endOfWeek(new Date())
+        start: startOfWeek(createDateInTimezone()),
+        end: endOfWeek(createDateInTimezone())
       })
     },
     {
       label: 'Este mes',
       getValue: () => ({
-        start: startOfMonth(new Date()),
-        end: endOfMonth(new Date())
+        start: startOfMonth(createDateInTimezone()),
+        end: endOfMonth(createDateInTimezone())
       })
     },
     {
       label: 'Mes pasado',
       getValue: () => {
-        const lastMonth = new Date()
-        lastMonth.setMonth(lastMonth.getMonth() - 1)
+        const now = createDateInTimezone()
+        const lastMonth = createDateInTimezone(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          now.getDate(),
+          now.getHours(),
+          now.getMinutes()
+        )
         return {
           start: startOfMonth(lastMonth),
           end: endOfMonth(lastMonth)
@@ -122,15 +147,15 @@ export function DateRangePicker({ className }: DateRangePickerProps) {
     {
       label: 'Este año',
       getValue: () => ({
-        start: startOfYear(new Date()),
-        end: endOfYear(new Date())
+        start: startOfYear(createDateInTimezone()),
+        end: endOfYear(createDateInTimezone())
       })
     },
     {
       label: 'Todo el tiempo',
       getValue: () => ({
-        start: new Date('2020-01-01'),
-        end: new Date()
+        start: createDateInTimezone(2020, 0, 1, 0, 0),
+        end: createDateInTimezone()
       })
     }
   ]
@@ -196,7 +221,7 @@ export function DateRangePicker({ className }: DateRangePickerProps) {
             const isStartDate = day.toDateString() === tempStartDate.toDateString()
             const isEndDate = day.toDateString() === tempEndDate.toDateString()
             const isInRange = day > tempStartDate && day < tempEndDate
-            const isToday = day.toDateString() === new Date().toDateString()
+            const isToday = day.toDateString() === createDateInTimezone().toDateString()
 
             // Active range (either selected or hover preview)
             const getActiveBounds = () => {

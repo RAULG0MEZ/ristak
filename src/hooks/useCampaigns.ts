@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { getApiUrl } from '../config/api'
+import { getApiUrl, fetchWithAuth } from '../config/api'
+import { dateToApiString } from '../lib/dateUtils'
 
 export interface CampaignsDateRange {
   start: Date
@@ -16,10 +17,19 @@ export function useCampaigns({ start, end }: CampaignsDateRange) {
       try {
         setLoading(true)
         setError(null)
-        const params = new URLSearchParams({ start: start.toISOString(), end: end.toISOString() })
-        const res = await fetch(getApiUrl(`/campaigns?${params.toString()}`))
+        // Formatear fechas como YYYY-MM-DD para evitar problemas de timezone
+        const startStr = dateToApiString(start);
+        const endStr = dateToApiString(end);
+        // Removido log de debug
+
+        const params = new URLSearchParams({ start: startStr, end: endStr })
+        const url = getApiUrl(`/campaigns?${params.toString()}`)
+        // URL construida correctamente
+
+        const res = await fetchWithAuth(url)
         if (!res.ok) throw new Error('Failed to fetch campaigns')
         const json = await res.json()
+        // Datos recibidos
         setCampaigns(json.data || [])
       } catch (e: any) {
         console.error('Error fetching campaigns', e)

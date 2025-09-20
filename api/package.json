@@ -1,20 +1,28 @@
 {
-  "name": "ristak-pro-api",
+  "name": "ristak-api",
   "version": "1.0.0",
-  "description": "API server for Ristak PRO dashboard",
+  "description": "API server for Ristak dashboard",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node test/services.test.js",
+    "test:watch": "nodemon test/services.test.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-    "pg": "^8.11.3",
     "dotenv": "^16.3.1",
-    "node-fetch": "^3.3.2"
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^4.2.1",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.11.3",
+    "ua-parser-js": "^2.0.5",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "axios": "^1.12.2",
     "nodemon": "^3.0.2"
   }
 }
