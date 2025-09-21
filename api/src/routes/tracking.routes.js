@@ -471,10 +471,11 @@ router.post('/collect', async (req, res) => {
     }
 
     // =============================================================================
-    // SISTEMA DE MATCHING INTELIGENTE ESTILO HYROS
+    // SISTEMA DE MATCHING INTELIGENTE ESTILO HYROS - LIFETIME JOURNEY
     // =============================================================================
     // Buscar si ya existe un visitor_id para este usuario basándose en múltiples señales
     // SOLO hacer match con combinaciones confiables, NUNCA señales aisladas
+    // SIN LÍMITE DE TIEMPO para capturar el journey completo del usuario
 
     // Obtener IP real (misma lógica que usamos más abajo para guardar)
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
@@ -482,23 +483,47 @@ router.post('/collect', async (req, res) => {
                req.connection.remoteAddress;
 
     const userAgent = data.user_agent || req.headers['user-agent'];
-    const timeWindow = new Date(Date.now() - 3600000); // Última hora
+
+    // Para actualización de sesiones huérfanas, usar ventana de 24 horas
+    // (no queremos actualizar sesiones muy viejas que probablemente son de otro usuario)
+    const updateWindow = new Date(Date.now() - 86400000); // 24 horas
 
     try {
-      console.log('\n🔍 [MATCHING] Buscando visitor_id existente...');
+      console.log('\n🔍 [MATCHING] Buscando visitor_id existente (lifetime)...');
 
-      // NIVEL 1: Match por fbclid/gclid (99% confianza)
-      if (data.fbclid || data.gclid) {
+      // NIVEL 1: Match por click IDs únicos de CUALQUIER PLATAFORMA (99% confianza)
+      // Estos IDs son únicos por usuario, así que son match seguro sin importar el tiempo
+      const clickIds = {
+        fbclid: data.fbclid,
+        gclid: data.gclid,
+        ttclid: data.ttclid,
+        li_fat_id: data.li_fat_id,
+        twclid: data.twclid,
+        pclid: data.pclid,
+        msclkid: data.msclkid,
+        wbraid: data.wbraid,
+        gbraid: data.gbraid,
+        epik: data.epik,
+        rdt_cid: data.rdt_cid,
+        sc_click_id: data.sc_click_id
+      };
+
+      // Buscar por CUALQUIER click ID que coincida
+      const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
+
+      if (activeClickIds.length > 0) {
+        const whereConditions = activeClickIds.map(([key, _], index) => `${key} = $${index + 1}`).join(' OR ');
+        const values = activeClickIds.map(([_, value]) => value);
+
         const clickIdMatch = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
+          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count,
+                  MAX(created_at) as last_seen
            FROM tracking.sessions
-           WHERE (fbclid = $1 OR gclid = $2)
-             AND fbclid IS NOT NULL
-             AND created_at > $3
+           WHERE (${whereConditions})
            GROUP BY visitor_id
            ORDER BY sessions_count DESC
            LIMIT 1`,
-          [data.fbclid, data.gclid, timeWindow]
+          values
         );
 
         if (clickIdMatch.rows.length > 0) {
@@ -508,109 +533,139 @@ router.post('/collect', async (req, res) => {
         }
       }
 
-      // NIVEL 2: Match por IP + User-Agent + fbclid/ad_id (90% confianza)
-      if (visitorId === data.vid && ip && userAgent && (data.fbclid || data.ad_id)) {
-        const level2Match = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
-           FROM tracking.sessions
-           WHERE ip = $1
-             AND user_agent = $2
-             AND (fbclid = $3 OR ad_id = $4)
-             AND created_at > $5
-           GROUP BY visitor_id
-           ORDER BY sessions_count DESC
-           LIMIT 1`,
-          [ip, userAgent, data.fbclid, data.ad_id, timeWindow]
-        );
+      // NIVEL 2: Match por IP + User-Agent + cualquier click ID o ad_id (90% confianza)
+      // Limitado a últimas 48 horas porque IP puede cambiar
+      if (visitorId === data.vid && ip && userAgent) {
+        const recentWindow = new Date(Date.now() - 172800000); // 48 horas
+        const clickIdValues = Object.values(clickIds).filter(v => v);
 
-        if (level2Match.rows.length > 0) {
-          const matchedVid = level2Match.rows[0].visitor_id;
-          console.log(`✅ [MATCHING] Match Nivel 2 - IP + UserAgent + Click/Ad ID. Usando visitor_id: ${matchedVid}`);
-          visitorId = matchedVid;
+        if (clickIdValues.length > 0 || data.ad_id) {
+          const level2Match = await databasePool.query(
+            `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
+             FROM tracking.sessions
+             WHERE ip = $1
+               AND user_agent = $2
+               AND (
+                 fbclid = ANY($3::text[]) OR
+                 gclid = ANY($3::text[]) OR
+                 ttclid = ANY($3::text[]) OR
+                 li_fat_id = ANY($3::text[]) OR
+                 ad_id = $4
+               )
+               AND created_at > $5
+             GROUP BY visitor_id
+             ORDER BY sessions_count DESC
+             LIMIT 1`,
+            [ip, userAgent, clickIdValues, data.ad_id, recentWindow]
+          );
+
+          if (level2Match.rows.length > 0) {
+            const matchedVid = level2Match.rows[0].visitor_id;
+            console.log(`✅ [MATCHING] Match Nivel 2 - IP + UserAgent + Click/Ad ID. Usando visitor_id: ${matchedVid}`);
+            visitorId = matchedVid;
+          }
         }
       }
 
-      // NIVEL 3: Match por IP + Device Signature + Timezone (85% confianza)
-      if (visitorId === data.vid && ip && data.device_sig && data.tz) {
+      // NIVEL 3: Match por Device Signature ÚNICO (95% confianza, sin límite de tiempo)
+      // El device signature es muy confiable y no cambia
+      if (visitorId === data.vid && data.device_sig) {
         const level3Match = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
+          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count,
+                  MAX(created_at) as last_seen
            FROM tracking.sessions
-           WHERE ip = $1
-             AND device_signature = $2
-             AND timezone = $3
-             AND created_at > $4
+           WHERE device_signature = $1
            GROUP BY visitor_id
            ORDER BY sessions_count DESC
            LIMIT 1`,
-          [ip, data.device_sig, data.tz, timeWindow]
+          [data.device_sig]
         );
 
         if (level3Match.rows.length > 0) {
           const matchedVid = level3Match.rows[0].visitor_id;
-          console.log(`✅ [MATCHING] Match Nivel 3 - IP + Device Signature + Timezone. Usando visitor_id: ${matchedVid}`);
+          console.log(`✅ [MATCHING] Match Nivel 3 - Device Signature único. Usando visitor_id: ${matchedVid}`);
           visitorId = matchedVid;
         }
       }
 
-      // NIVEL 4: Match por IP + Canvas/WebGL Fingerprint + User-Agent (80% confianza)
-      if (visitorId === data.vid && ip && (data.canvas_fp || data.webgl_fp) && userAgent) {
+      // NIVEL 4: Match por Canvas/WebGL Fingerprint ÚNICO (90% confianza, sin límite de tiempo)
+      if (visitorId === data.vid && (data.canvas_fp || data.webgl_fp)) {
         const level4Match = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
+          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count,
+                  MAX(created_at) as last_seen
            FROM tracking.sessions
-           WHERE ip = $1
-             AND user_agent = $2
-             AND (canvas_fingerprint = $3 OR webgl_fingerprint = $4)
-             AND created_at > $5
+           WHERE (canvas_fingerprint = $1 OR webgl_fingerprint = $2)
+             AND (canvas_fingerprint IS NOT NULL OR webgl_fingerprint IS NOT NULL)
            GROUP BY visitor_id
            ORDER BY sessions_count DESC
            LIMIT 1`,
-          [ip, userAgent, data.canvas_fp, data.webgl_fp, timeWindow]
+          [data.canvas_fp, data.webgl_fp]
         );
 
         if (level4Match.rows.length > 0) {
           const matchedVid = level4Match.rows[0].visitor_id;
-          console.log(`✅ [MATCHING] Match Nivel 4 - IP + Fingerprint + UserAgent. Usando visitor_id: ${matchedVid}`);
+          console.log(`✅ [MATCHING] Match Nivel 4 - Canvas/WebGL Fingerprint único. Usando visitor_id: ${matchedVid}`);
           visitorId = matchedVid;
         }
       }
 
-      // NIVEL 5: Para Facebook/Instagram in-app browsers específicamente
-      // Match por IP + User-Agent con FBAN/Instagram + misma campaña (75% confianza)
-      if (visitorId === data.vid && ip && userAgent &&
-          (userAgent.includes('FBAN') || userAgent.includes('Instagram')) &&
-          data.utm_campaign) {
-        const fbInAppMatch = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
-           FROM tracking.sessions
-           WHERE ip = $1
-             AND user_agent = $2
-             AND utm_campaign = $3
-             AND created_at > $4
-           GROUP BY visitor_id
-           ORDER BY sessions_count DESC
-           LIMIT 1`,
-          [ip, userAgent, data.utm_campaign, timeWindow]
-        );
+      // NIVEL 5: Para in-app browsers de CUALQUIER PLATAFORMA
+      // Match por IP + User-Agent con identificadores de in-app + misma campaña (75% confianza)
+      if (visitorId === data.vid && ip && userAgent && data.utm_campaign) {
+        // Detectar in-app browsers de todas las plataformas
+        const isInAppBrowser =
+          userAgent.includes('FBAN') ||        // Facebook
+          userAgent.includes('FBAV') ||        // Facebook
+          userAgent.includes('Instagram') ||    // Instagram
+          userAgent.includes('LinkedInApp') ||  // LinkedIn
+          userAgent.includes('Twitter') ||      // Twitter/X
+          userAgent.includes('Pinterest') ||    // Pinterest
+          userAgent.includes('Snapchat') ||     // Snapchat
+          userAgent.includes('TikTok') ||       // TikTok
+          userAgent.includes('BytedanceWebview') || // TikTok alternativo
+          userAgent.includes('Line/') ||        // Line
+          userAgent.includes('WhatsApp') ||     // WhatsApp
+          userAgent.includes('Telegram');        // Telegram
 
-        if (fbInAppMatch.rows.length > 0) {
-          const matchedVid = fbInAppMatch.rows[0].visitor_id;
-          console.log(`✅ [MATCHING] Match Nivel 5 - Facebook/Instagram In-App Browser. Usando visitor_id: ${matchedVid}`);
-          visitorId = matchedVid;
+        if (isInAppBrowser) {
+          const inAppMatch = await databasePool.query(
+            `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
+             FROM tracking.sessions
+             WHERE ip = $1
+               AND user_agent = $2
+               AND utm_campaign = $3
+               AND created_at > $4
+             GROUP BY visitor_id
+             ORDER BY sessions_count DESC
+             LIMIT 1`,
+            [ip, userAgent, data.utm_campaign, new Date(Date.now() - 604800000)] // 7 días para in-app
+          );
+
+          if (inAppMatch.rows.length > 0) {
+            const matchedVid = inAppMatch.rows[0].visitor_id;
+            console.log(`✅ [MATCHING] Match Nivel 5 - In-App Browser detectado. Usando visitor_id: ${matchedVid}`);
+            visitorId = matchedVid;
+          }
         }
       }
 
-      // Si encontramos un match, actualizar todas las sesiones huérfanas con el mismo patrón
+      // Si encontramos un match, actualizar sesiones huérfanas recientes
       if (visitorId !== data.vid) {
         console.log(`🔄 [MATCHING] Actualizando sesiones huérfanas del visitor original ${data.vid} -> ${visitorId}`);
 
-        // Actualizar sesiones anteriores que tenían el visitor_id incorrecto
-        await databasePool.query(
+        // Solo actualizar sesiones de las últimas 24 horas para evitar mezclar usuarios
+        const updateResult = await databasePool.query(
           `UPDATE tracking.sessions
            SET visitor_id = $1
            WHERE visitor_id = $2
-             AND created_at > $3`,
-          [visitorId, data.vid, timeWindow]
+             AND created_at > $3
+           RETURNING session_id`,
+          [visitorId, data.vid, updateWindow]
         );
+
+        if (updateResult.rowCount > 0) {
+          console.log(`📝 [MATCHING] Actualizadas ${updateResult.rowCount} sesiones huérfanas`);
+        }
       }
 
     } catch (matchError) {
