@@ -165,30 +165,17 @@ return gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
 return gl.getParameter(gl.RENDERER);
 }catch(e){return null}};
 var getAudioFp=function(){try{
+// Audio fingerprinting simplificado - no requiere permisos
 var AudioContext=window.AudioContext||window.webkitAudioContext;
-if(!AudioContext)return null;
-var context=new AudioContext();
-var oscillator=context.createOscillator();
-var analyser=context.createAnalyser();
-var gainNode=context.createGain();
-var scriptProcessor=context.createScriptProcessor(4096,1,1);
-gainNode.gain.value=0;
-oscillator.connect(analyser);
-analyser.connect(scriptProcessor);
-scriptProcessor.connect(gainNode);
-gainNode.connect(context.destination);
-oscillator.start(0);
-var fp='';
-scriptProcessor.onaudioprocess=function(e){
-var output=e.outputBuffer.getChannelData(0);
-for(var i=0;i<100;i++){fp+=Math.abs(output[i]).toString().substr(0,6)}
-oscillator.disconnect();
-analyser.disconnect();
-scriptProcessor.disconnect();
-gainNode.disconnect();
-context.close();
+if(!AudioContext)return 'no_audio_context';
+// Solo verificar capacidades, no crear audio real
+var testData={
+sampleRate:new AudioContext().sampleRate||44100,
+channelCount:new AudioContext().destination.channelCount||2,
+maxChannels:new AudioContext().destination.maxChannelCount||2
 };
-return fp.substring(0,50);
+// Crear fingerprint basado en capacidades del audio
+return 'audio_'+testData.sampleRate+'_'+testData.channelCount+'_'+testData.maxChannels;
 }catch(e){return null}};
 var getFontsFp=function(){try{
 var fonts=['monospace','sans-serif','serif'];
@@ -783,7 +770,16 @@ router.post('/collect', async (req, res) => {
       data.audio_fp || null,              // $115 audio_fingerprint
       data.fonts_fp || null,              // $116 fonts_fingerprint
       data.device_sig || null,            // $117 device_signature
-      null                                 // $118 fingerprint_probability (se calcula después)
+      // Calcular calidad de fingerprinting (qué tan confiable es)
+      (() => {
+        let quality = 0;
+        if (data.canvas_fp) quality += 30;
+        if (data.webgl_fp) quality += 25;
+        if (data.screen_fp) quality += 10;
+        if (data.audio_fp) quality += 15;
+        if (data.fonts_fp) quality += 20;
+        return quality > 0 ? quality : null;
+      })()                                 // $118 fingerprint_probability (calidad del fingerprint)
     ]);
 
     // =============================================================================
