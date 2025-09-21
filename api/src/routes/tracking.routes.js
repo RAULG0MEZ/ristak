@@ -328,14 +328,26 @@ city:c("city"),
 source:c("source"),
 channel:c("channel")
 };
-// Intentar obtener datos del usuario guardados
+// Intentar obtener datos del usuario guardados (GHL y nuestro rstk_local)
+// Primero intentar con nuestro rstk_local (tiene prioridad)
+try{var rstk=a.getItem("rstk_local");if(rstk){var rstkData=JSON.parse(rstk);
+console.log("[HT] 🔑 rstk_local detectado:",rstkData);
+o.contact_id=rstkData.contact_id,
+o.rstk_adid=rstkData.rstk_adid,
+o.rstk_source=rstkData.rstk_source,
+!o.email&&rstkData.email&&(o.email=rstkData.email),
+!o.phone&&rstkData.phone&&(o.phone=rstkData.phone),
+!o.first_name&&rstkData.first_name&&(o.first_name=rstkData.first_name),
+!o.last_name&&rstkData.last_name&&(o.last_name=rstkData.last_name)}}catch(e){}
+// Luego intentar con _ud de GHL
 try{var r=a.getItem("_ud");if(r){var userData=JSON.parse(r);
+console.log("[HT] 🔐 _ud de GHL detectado");
 o.ghl_contact_id=userData.customer_id||userData.id,
 o.ghl_location_id=userData.location_id,
 !o.email&&userData.email&&(o.email=userData.email),
 !o.phone&&userData.phone&&(o.phone=userData.phone),
-o.first_name=userData.first_name||userData.firstName,
-o.last_name=userData.last_name||userData.lastName,
+!o.first_name&&(o.first_name=userData.first_name||userData.firstName),
+!o.last_name&&(o.last_name=userData.last_name||userData.lastName),
 o.full_name=userData.full_name||userData.name,
 o.country=o.country||userData.country,
 userData.source&&(o.ghl_source=userData.source)}}catch(e){}
@@ -356,7 +368,25 @@ console.log("📦 Total parámetros enviados:",paramCount);
 console.log("📋 Datos completos:",cleanData);
 console.groupEnd();
 fetch(x,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o),keepalive:!0})
-.then((function(r){console.log("[HT] ✅ Evento enviado exitosamente (Status: "+r.status+")")}))
+.then((function(r){
+console.log("[HT] ✅ Evento enviado exitosamente (Status: "+r.status+")");
+// Si el servidor devolvió un contact_id, guardarlo en rstk_local
+if(r.status===200){return r.json().then(function(data){
+if(data.contact_id&&(o.email||o.phone||o.ghl_contact_id)){
+var rstkLocal={
+contact_id:data.contact_id,
+visitor_id:u,
+email:o.email||null,
+phone:o.phone||null,
+first_name:o.first_name||null,
+last_name:o.last_name||null,
+rstk_adid:o.ad_id||o.campaign_id||null,
+rstk_source:o.utm_source||o.ghl_source||null,
+updated_at:new Date().toISOString()
+};
+a.setItem("rstk_local",JSON.stringify(rstkLocal));
+console.log("[HT] 💾 rstk_local guardado:",rstkLocal)
+}}).catch(function(){})}}))
 .catch((function(e){console.warn("[HT] ⚠️ Error, reintentando con beacon:",e.message);
 if(navigator.sendBeacon){var n=new Blob([JSON.stringify(o)],{type:"application/json"});
 navigator.sendBeacon(x,n)&&console.log("[HT] 📡 Beacon enviado como fallback")}}))};
@@ -831,14 +861,19 @@ router.post('/collect', async (req, res) => {
         const unifiedContact = await contactUnificationService.findOrCreateUnified(contactData);
 
         if (unifiedContact && unifiedContact.contact_id) {
-          // CAMBIADO: Ahora actualizamos TODAS las filas de esta sesión
-          // Ya que cada pageview es una fila separada
+          // ACTUALIZACIÓN CRÍTICA: Vinculamos TODAS las sesiones históricas del mismo visitor_id
+          // Esto permite hacer match retroactivo cuando el usuario convierte
           const updateResult = await databasePool.query(
-            'UPDATE tracking.sessions SET contact_id = $1 WHERE session_id = $2',
-            [unifiedContact.contact_id, sessionId]
+            `UPDATE tracking.sessions
+             SET contact_id = $1
+             WHERE visitor_id = $2 AND contact_id IS NULL`,
+            [unifiedContact.contact_id, visitorId]
           );
 
-          console.log(`[Tracking → Contact] ${updateResult.rowCount} pageviews de sesión ${sessionId} vinculados a contacto ${unifiedContact.contact_id}`);
+          console.log(`[Tracking → Contact] ✅ ${updateResult.rowCount} sesiones históricas del visitor ${visitorId} vinculadas a contacto ${unifiedContact.contact_id}`);
+
+          // También guardar en nuestro propio localStorage (rstk_local)
+          // Esto se hace en el cliente, no en el servidor
 
           // NUEVO: Unificación probabilística por fingerprints
           // Buscar y vincular sesiones con fingerprints similares
@@ -873,7 +908,24 @@ router.post('/collect', async (req, res) => {
       }
     }
 
-    res.json({ success: true });
+    // Devolver el contact_id si se creó/unificó uno
+    // Esto permite al cliente guardarlo en rstk_local
+    const responseData = { success: true };
+
+    // Buscar si esta sesión ya tiene un contact_id asignado
+    try {
+      const contactResult = await databasePool.query(
+        'SELECT contact_id FROM tracking.sessions WHERE session_id = $1 AND contact_id IS NOT NULL LIMIT 1',
+        [sessionId]
+      );
+      if (contactResult.rows.length > 0 && contactResult.rows[0].contact_id) {
+        responseData.contact_id = contactResult.rows[0].contact_id;
+      }
+    } catch (e) {
+      // No pasa nada, solo no devolvemos contact_id
+    }
+
+    res.json(responseData);
 
   } catch (error) {
     console.error('Error in /collect:', error);
