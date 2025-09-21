@@ -489,10 +489,9 @@ router.post('/collect', async (req, res) => {
     const updateWindow = new Date(Date.now() - 86400000); // 24 horas
 
     try {
-      console.log('\n🔍 [MATCHING] Buscando visitor_id existente (lifetime)...');
+      console.log('\n🔍 [MATCHING] Sistema BRUTAL de matching probabilístico...');
 
-      // NIVEL 1: Match por click IDs únicos de CUALQUIER PLATAFORMA (99% confianza)
-      // Estos IDs son únicos por usuario, así que son match seguro sin importar el tiempo
+      // Preparar todos los datos para matching
       const clickIds = {
         fbclid: data.fbclid,
         gclid: data.gclid,
@@ -505,19 +504,29 @@ router.post('/collect', async (req, res) => {
         gbraid: data.gbraid,
         epik: data.epik,
         rdt_cid: data.rdt_cid,
-        sc_click_id: data.sc_click_id
+        sc_click_id: data.sc_click_id,
+        yclid: data.yclid,
+        qclid: data.qclid
       };
 
-      // Buscar por CUALQUIER click ID que coincida
-      const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
+      const hasAnyClickId = Object.values(clickIds).some(v => v);
+      const hasDeviceSignature = Boolean(data.device_sig);
+      const hasCanvasFingerprint = Boolean(data.canvas_fp);
+      const hasWebGLFingerprint = Boolean(data.webgl_fp);
+      const hasAudioFingerprint = Boolean(data.audio_fp);
+      const hasFontsFingerprint = Boolean(data.fonts_fp);
+      const hasScreenFingerprint = Boolean(data.screen_fp);
 
-      if (activeClickIds.length > 0) {
+      // ========================================================================
+      // NIVEL 1: CLICK ID ÚNICO (99.9% confianza) - Sin límite de tiempo
+      // ========================================================================
+      if (hasAnyClickId && visitorId === data.vid) {
+        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
         const whereConditions = activeClickIds.map(([key, _], index) => `${key} = $${index + 1}`).join(' OR ');
         const values = activeClickIds.map(([_, value]) => value);
 
-        const clickIdMatch = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count,
-                  MAX(created_at) as last_seen
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
            FROM tracking.sessions
            WHERE (${whereConditions})
            GROUP BY visitor_id
@@ -526,53 +535,18 @@ router.post('/collect', async (req, res) => {
           values
         );
 
-        if (clickIdMatch.rows.length > 0) {
-          const matchedVid = clickIdMatch.rows[0].visitor_id;
-          console.log(`✅ [MATCHING] Match Nivel 1 - Click ID idéntico. Usando visitor_id existente: ${matchedVid}`);
-          visitorId = matchedVid;
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [99.9%] Click ID único - Match absoluto: ${visitorId}`);
         }
       }
 
-      // NIVEL 2: Match por IP + User-Agent + cualquier click ID o ad_id (90% confianza)
-      // Limitado a últimas 48 horas porque IP puede cambiar
-      if (visitorId === data.vid && ip && userAgent) {
-        const recentWindow = new Date(Date.now() - 172800000); // 48 horas
-        const clickIdValues = Object.values(clickIds).filter(v => v);
-
-        if (clickIdValues.length > 0 || data.ad_id) {
-          const level2Match = await databasePool.query(
-            `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
-             FROM tracking.sessions
-             WHERE ip = $1
-               AND user_agent = $2
-               AND (
-                 fbclid = ANY($3::text[]) OR
-                 gclid = ANY($3::text[]) OR
-                 ttclid = ANY($3::text[]) OR
-                 li_fat_id = ANY($3::text[]) OR
-                 ad_id = $4
-               )
-               AND created_at > $5
-             GROUP BY visitor_id
-             ORDER BY sessions_count DESC
-             LIMIT 1`,
-            [ip, userAgent, clickIdValues, data.ad_id, recentWindow]
-          );
-
-          if (level2Match.rows.length > 0) {
-            const matchedVid = level2Match.rows[0].visitor_id;
-            console.log(`✅ [MATCHING] Match Nivel 2 - IP + UserAgent + Click/Ad ID. Usando visitor_id: ${matchedVid}`);
-            visitorId = matchedVid;
-          }
-        }
-      }
-
-      // NIVEL 3: Match por Device Signature ÚNICO (95% confianza, sin límite de tiempo)
-      // El device signature es muy confiable y no cambia
-      if (visitorId === data.vid && data.device_sig) {
-        const level3Match = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count,
-                  MAX(created_at) as last_seen
+      // ========================================================================
+      // NIVEL 2: DEVICE SIGNATURE ÚNICO (98% confianza) - Sin límite de tiempo
+      // ========================================================================
+      if (hasDeviceSignature && visitorId === data.vid) {
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
            FROM tracking.sessions
            WHERE device_signature = $1
            GROUP BY visitor_id
@@ -581,70 +555,472 @@ router.post('/collect', async (req, res) => {
           [data.device_sig]
         );
 
-        if (level3Match.rows.length > 0) {
-          const matchedVid = level3Match.rows[0].visitor_id;
-          console.log(`✅ [MATCHING] Match Nivel 3 - Device Signature único. Usando visitor_id: ${matchedVid}`);
-          visitorId = matchedVid;
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [98%] Device Signature único: ${visitorId}`);
         }
       }
 
-      // NIVEL 4: Match por Canvas/WebGL Fingerprint ÚNICO (90% confianza, sin límite de tiempo)
-      if (visitorId === data.vid && (data.canvas_fp || data.webgl_fp)) {
-        const level4Match = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count,
-                  MAX(created_at) as last_seen
+      // ========================================================================
+      // NIVEL 3: CANVAS FINGERPRINT ÚNICO (95% confianza) - Sin límite
+      // ========================================================================
+      if (hasCanvasFingerprint && visitorId === data.vid) {
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
            FROM tracking.sessions
-           WHERE (canvas_fingerprint = $1 OR webgl_fingerprint = $2)
-             AND (canvas_fingerprint IS NOT NULL OR webgl_fingerprint IS NOT NULL)
+           WHERE canvas_fingerprint = $1
            GROUP BY visitor_id
            ORDER BY sessions_count DESC
            LIMIT 1`,
-          [data.canvas_fp, data.webgl_fp]
+          [data.canvas_fp]
         );
 
-        if (level4Match.rows.length > 0) {
-          const matchedVid = level4Match.rows[0].visitor_id;
-          console.log(`✅ [MATCHING] Match Nivel 4 - Canvas/WebGL Fingerprint único. Usando visitor_id: ${matchedVid}`);
-          visitorId = matchedVid;
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [95%] Canvas Fingerprint único: ${visitorId}`);
         }
       }
 
-      // NIVEL 5: Para in-app browsers de CUALQUIER PLATAFORMA
-      // Match por IP + User-Agent con identificadores de in-app + misma campaña (75% confianza)
-      if (visitorId === data.vid && ip && userAgent && data.utm_campaign) {
-        // Detectar in-app browsers de todas las plataformas
+      // ========================================================================
+      // NIVEL 4: CLICK ID + DEVICE SIGNATURE (99.5% confianza)
+      // ========================================================================
+      if (hasAnyClickId && hasDeviceSignature && visitorId === data.vid) {
+        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
+        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 2}`).join(' OR ');
+        const values = [data.device_sig, ...activeClickIds.map(([_, value]) => value)];
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE device_signature = $1 AND (${clickConditions})
+           LIMIT 1`,
+          values
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [99.5%] Click ID + Device Signature: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 5: CLICK ID + CANVAS (99% confianza)
+      // ========================================================================
+      if (hasAnyClickId && hasCanvasFingerprint && visitorId === data.vid) {
+        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
+        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 2}`).join(' OR ');
+        const values = [data.canvas_fp, ...activeClickIds.map(([_, value]) => value)];
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE canvas_fingerprint = $1 AND (${clickConditions})
+           LIMIT 1`,
+          values
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [99%] Click ID + Canvas: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 6: DEVICE + CANVAS (97% confianza)
+      // ========================================================================
+      if (hasDeviceSignature && hasCanvasFingerprint && visitorId === data.vid) {
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE device_signature = $1 AND canvas_fingerprint = $2
+           LIMIT 1`,
+          [data.device_sig, data.canvas_fp]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [97%] Device + Canvas: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 7: CLICK ID + WEBGL (96% confianza)
+      // ========================================================================
+      if (hasAnyClickId && hasWebGLFingerprint && visitorId === data.vid) {
+        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
+        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 2}`).join(' OR ');
+        const values = [data.webgl_fp, ...activeClickIds.map(([_, value]) => value)];
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE webgl_fingerprint = $1 AND (${clickConditions})
+           LIMIT 1`,
+          values
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [96%] Click ID + WebGL: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 8: CANVAS + WEBGL + AUDIO (94% confianza)
+      // ========================================================================
+      if (hasCanvasFingerprint && hasWebGLFingerprint && hasAudioFingerprint && visitorId === data.vid) {
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE canvas_fingerprint = $1
+             AND webgl_fingerprint = $2
+             AND audio_fingerprint = $3
+           LIMIT 1`,
+          [data.canvas_fp, data.webgl_fp, data.audio_fp]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [94%] Canvas + WebGL + Audio: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 9: IP + CLICK ID (92% confianza) - 48 horas
+      // ========================================================================
+      if (hasAnyClickId && ip && visitorId === data.vid) {
+        const recentWindow = new Date(Date.now() - 172800000); // 48 horas
+        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
+        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 2}`).join(' OR ');
+        const values = [ip, ...activeClickIds.map(([_, value]) => value), recentWindow];
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE ip = $1 AND (${clickConditions})
+             AND created_at > $${values.length}
+           LIMIT 1`,
+          values
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [92%] IP + Click ID (48h): ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 10: USER-AGENT + CLICK ID + CAMPAIGN (91% confianza)
+      // ========================================================================
+      if (hasAnyClickId && userAgent && data.utm_campaign && visitorId === data.vid) {
+        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
+        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 3}`).join(' OR ');
+        const values = [userAgent, data.utm_campaign, ...activeClickIds.map(([_, value]) => value)];
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE user_agent = $1
+             AND utm_campaign = $2
+             AND (${clickConditions})
+           LIMIT 1`,
+          values
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [91%] UserAgent + Click ID + Campaign: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 11: DEVICE + WEBGL (90% confianza)
+      // ========================================================================
+      if (hasDeviceSignature && hasWebGLFingerprint && visitorId === data.vid) {
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE device_signature = $1 AND webgl_fingerprint = $2
+           LIMIT 1`,
+          [data.device_sig, data.webgl_fp]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [90%] Device + WebGL: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 12: IP + DEVICE SIGNATURE (88% confianza) - 7 días
+      // ========================================================================
+      if (ip && hasDeviceSignature && visitorId === data.vid) {
+        const weekWindow = new Date(Date.now() - 604800000); // 7 días
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE ip = $1 AND device_signature = $2
+             AND created_at > $3
+           LIMIT 1`,
+          [ip, data.device_sig, weekWindow]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [88%] IP + Device Signature (7d): ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 13: IP + CANVAS (87% confianza) - 7 días
+      // ========================================================================
+      if (ip && hasCanvasFingerprint && visitorId === data.vid) {
+        const weekWindow = new Date(Date.now() - 604800000);
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE ip = $1 AND canvas_fingerprint = $2
+             AND created_at > $3
+           LIMIT 1`,
+          [ip, data.canvas_fp, weekWindow]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [87%] IP + Canvas (7d): ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 14: IP + USER-AGENT + CANVAS (85% confianza) - 24 horas
+      // ========================================================================
+      if (ip && userAgent && hasCanvasFingerprint && visitorId === data.vid) {
+        const dayWindow = new Date(Date.now() - 86400000);
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE ip = $1 AND user_agent = $2 AND canvas_fingerprint = $3
+             AND created_at > $4
+           LIMIT 1`,
+          [ip, userAgent, data.canvas_fp, dayWindow]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [85%] IP + UserAgent + Canvas (24h): ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 15: IP + USER-AGENT + DEVICE (84% confianza) - 24 horas
+      // ========================================================================
+      if (ip && userAgent && hasDeviceSignature && visitorId === data.vid) {
+        const dayWindow = new Date(Date.now() - 86400000);
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE ip = $1 AND user_agent = $2 AND device_signature = $3
+             AND created_at > $4
+           LIMIT 1`,
+          [ip, userAgent, data.device_sig, dayWindow]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [84%] IP + UserAgent + Device (24h): ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 16: WEBGL + AUDIO + FONTS (83% confianza)
+      // ========================================================================
+      if (hasWebGLFingerprint && hasAudioFingerprint && hasFontsFingerprint && visitorId === data.vid) {
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE webgl_fingerprint = $1
+             AND audio_fingerprint = $2
+             AND fonts_fingerprint = $3
+           LIMIT 1`,
+          [data.webgl_fp, data.audio_fp, data.fonts_fp]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [83%] WebGL + Audio + Fonts: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 17: IP + USER-AGENT + CAMPAIGN + AD_ID (82% confianza) - 24h
+      // ========================================================================
+      if (ip && userAgent && data.utm_campaign && data.ad_id && visitorId === data.vid) {
+        const dayWindow = new Date(Date.now() - 86400000);
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE ip = $1 AND user_agent = $2
+             AND utm_campaign = $3 AND ad_id = $4
+             AND created_at > $5
+           LIMIT 1`,
+          [ip, userAgent, data.utm_campaign, data.ad_id, dayWindow]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [82%] IP + UA + Campaign + Ad ID (24h): ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 18: TIMEZONE + LANGUAGE + DEVICE + CANVAS (80% confianza)
+      // ========================================================================
+      if (data.tz && data.lang && hasDeviceSignature && hasCanvasFingerprint && visitorId === data.vid) {
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE timezone = $1 AND language = $2
+             AND device_signature = $3 AND canvas_fingerprint = $4
+           LIMIT 1`,
+          [data.tz, data.lang, data.device_sig, data.canvas_fp]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [80%] Timezone + Lang + Device + Canvas: ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 19: IN-APP BROWSER + IP + CAMPAIGN (78% confianza) - 7 días
+      // ========================================================================
+      if (ip && userAgent && data.utm_campaign && visitorId === data.vid) {
         const isInAppBrowser =
-          userAgent.includes('FBAN') ||        // Facebook
-          userAgent.includes('FBAV') ||        // Facebook
-          userAgent.includes('Instagram') ||    // Instagram
-          userAgent.includes('LinkedInApp') ||  // LinkedIn
-          userAgent.includes('Twitter') ||      // Twitter/X
-          userAgent.includes('Pinterest') ||    // Pinterest
-          userAgent.includes('Snapchat') ||     // Snapchat
-          userAgent.includes('TikTok') ||       // TikTok
-          userAgent.includes('BytedanceWebview') || // TikTok alternativo
-          userAgent.includes('Line/') ||        // Line
-          userAgent.includes('WhatsApp') ||     // WhatsApp
-          userAgent.includes('Telegram');        // Telegram
+          userAgent.includes('FBAN') || userAgent.includes('FBAV') ||
+          userAgent.includes('Instagram') || userAgent.includes('LinkedInApp') ||
+          userAgent.includes('Twitter') || userAgent.includes('Pinterest') ||
+          userAgent.includes('Snapchat') || userAgent.includes('TikTok') ||
+          userAgent.includes('BytedanceWebview') || userAgent.includes('Line/') ||
+          userAgent.includes('WhatsApp') || userAgent.includes('Telegram');
 
         if (isInAppBrowser) {
-          const inAppMatch = await databasePool.query(
-            `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
+          const weekWindow = new Date(Date.now() - 604800000);
+
+          const match = await databasePool.query(
+            `SELECT DISTINCT visitor_id
              FROM tracking.sessions
-             WHERE ip = $1
-               AND user_agent = $2
-               AND utm_campaign = $3
+             WHERE ip = $1 AND user_agent = $2 AND utm_campaign = $3
                AND created_at > $4
-             GROUP BY visitor_id
-             ORDER BY sessions_count DESC
              LIMIT 1`,
-            [ip, userAgent, data.utm_campaign, new Date(Date.now() - 604800000)] // 7 días para in-app
+            [ip, userAgent, data.utm_campaign, weekWindow]
           );
 
-          if (inAppMatch.rows.length > 0) {
-            const matchedVid = inAppMatch.rows[0].visitor_id;
-            console.log(`✅ [MATCHING] Match Nivel 5 - In-App Browser detectado. Usando visitor_id: ${matchedVid}`);
-            visitorId = matchedVid;
+          if (match.rows.length > 0) {
+            visitorId = match.rows[0].visitor_id;
+            console.log(`✅ [78%] In-App Browser + IP + Campaign (7d): ${visitorId}`);
+          }
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 20: IP + USER-AGENT + SOURCE + MEDIUM (75% confianza) - 12h
+      // ========================================================================
+      if (ip && userAgent && data.utm_source && data.utm_medium && visitorId === data.vid) {
+        const halfDayWindow = new Date(Date.now() - 43200000); // 12 horas
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE ip = $1 AND user_agent = $2
+             AND utm_source = $3 AND utm_medium = $4
+             AND created_at > $5
+           LIMIT 1`,
+          [ip, userAgent, data.utm_source, data.utm_medium, halfDayWindow]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [75%] IP + UA + Source + Medium (12h): ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 21: IP SUBNET + DEVICE + TIMEZONE (73% confianza) - 3 días
+      // ========================================================================
+      if (ip && hasDeviceSignature && data.tz && visitorId === data.vid) {
+        // Obtener subnet (primeros 3 octetos para IPv4, primeros 4 bloques para IPv6)
+        const ipSubnet = ip.includes(':')
+          ? ip.split(':').slice(0, 4).join(':')  // IPv6
+          : ip.split('.').slice(0, 3).join('.');  // IPv4
+
+        const threeDayWindow = new Date(Date.now() - 259200000);
+
+        const match = await databasePool.query(
+          `SELECT DISTINCT visitor_id
+           FROM tracking.sessions
+           WHERE ip LIKE $1
+             AND device_signature = $2
+             AND timezone = $3
+             AND created_at > $4
+           LIMIT 1`,
+          [ipSubnet + '%', data.device_sig, data.tz, threeDayWindow]
+        );
+
+        if (match.rows.length > 0) {
+          visitorId = match.rows[0].visitor_id;
+          console.log(`✅ [73%] IP Subnet + Device + Timezone (3d): ${visitorId}`);
+        }
+      }
+
+      // ========================================================================
+      // NIVEL 22: ÚLTIMO RECURSO - MÚLTIPLES FINGERPRINTS PARCIALES (70%)
+      // ========================================================================
+      if (visitorId === data.vid) {
+        // Contar cuántos fingerprints coinciden
+        let fingerprintMatches = 0;
+        let whereConditions = [];
+        let values = [];
+        let paramIndex = 1;
+
+        if (hasCanvasFingerprint) {
+          whereConditions.push(`canvas_fingerprint = $${paramIndex++}`);
+          values.push(data.canvas_fp);
+          fingerprintMatches++;
+        }
+        if (hasWebGLFingerprint) {
+          whereConditions.push(`webgl_fingerprint = $${paramIndex++}`);
+          values.push(data.webgl_fp);
+          fingerprintMatches++;
+        }
+        if (hasAudioFingerprint) {
+          whereConditions.push(`audio_fingerprint = $${paramIndex++}`);
+          values.push(data.audio_fp);
+          fingerprintMatches++;
+        }
+        if (hasFontsFingerprint) {
+          whereConditions.push(`fonts_fingerprint = $${paramIndex++}`);
+          values.push(data.fonts_fp);
+          fingerprintMatches++;
+        }
+
+        // Solo hacer match si tenemos al menos 3 fingerprints que coinciden
+        if (fingerprintMatches >= 3 && whereConditions.length > 0) {
+          const match = await databasePool.query(
+            `SELECT DISTINCT visitor_id
+             FROM tracking.sessions
+             WHERE ${whereConditions.join(' AND ')}
+             LIMIT 1`,
+            values
+          );
+
+          if (match.rows.length > 0) {
+            visitorId = match.rows[0].visitor_id;
+            console.log(`✅ [70%] Múltiples Fingerprints (${fingerprintMatches}/4): ${visitorId}`);
           }
         }
       }
