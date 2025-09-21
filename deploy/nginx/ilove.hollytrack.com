@@ -57,8 +57,8 @@ server {
     }
 
     # PROHIBIDO: Solo tracking - no frontend
-    # Cualquier otra ruta redirige a la app principal
+    # Cualquier otra ruta redirige a la app principal (usando variable)
     location / {
-        return 301 https://app.hollytrack.com$request_uri;
+        return 301 https://${DOMAIN_APP}$request_uri;
     }
 }

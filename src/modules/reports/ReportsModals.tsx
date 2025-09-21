@@ -482,7 +482,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
               <div className="flex justify-between items-center">
                 <span className="text-secondary">Total del período:</span>
                 <span className="text-xl font-semibold text-primary">
-                  {formatCurrency(sales.reduce((sum, s) => sum + (s.amount || 0), 0))}
+                  {formatCurrency(sales.reduce((sum, s) => sum + (Number(s.amount) || 0), 0))}
                 </span>
               </div>
             </div>

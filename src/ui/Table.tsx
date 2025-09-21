@@ -12,7 +12,7 @@ export const Table = React.forwardRef<HTMLTableElement, TableProps>(
       <div className={cn('w-full', !fluid && 'overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0')}>
         <table
           ref={ref}
-          className={cn('w-full text-sm', !fluid && 'min-w-[600px]', className)}
+          className={cn('w-full text-sm border-collapse', !fluid && 'min-w-[600px]', className)}
           {...props}
         />
       </div>

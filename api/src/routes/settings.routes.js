@@ -24,6 +24,49 @@ function buildSettingsResponse(row) {
   };
 }
 
+// GET /api/settings/domains-config
+// Endpoint para obtener configuración de dominios y webhooks desde variables de entorno
+router.get('/domains-config', async (req, res) => {
+  try {
+    // Obtener dominios desde variables de entorno o usar defaults
+    const domainApp = process.env.DOMAIN_APP || 'app.hollytrack.com';
+    const domainSend = process.env.DOMAIN_SEND || 'send.hollytrack.com';
+    const domainTrack = process.env.DOMAIN_TRACK || 'ilove.hollytrack.com';
+    const webhookBase = process.env.WEBHOOK_BASE_URL || `https://${domainSend}`;
+
+    const config = {
+      domains: {
+        app: domainApp,
+        send: domainSend,
+        track: domainTrack
+      },
+      webhook_base_url: webhookBase,
+      webhook_endpoints: {
+        contacts: `${webhookBase}/webhook/contacts`,
+        appointments: `${webhookBase}/webhook/appointments`,
+        payments: `${webhookBase}/webhook/payments`,
+        refunds: `${webhookBase}/webhook/refunds`
+      },
+      tracking: {
+        host: domainTrack,
+        snippet_url: `https://${domainTrack}/snip.js`,
+        snippet_code: `<script defer src="https://${domainTrack}/snip.js"></script>`
+      }
+    };
+
+    res.json({
+      success: true,
+      data: config
+    });
+  } catch (error) {
+    console.error('[Settings] Error getting domains config:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load domains configuration'
+    });
+  }
+});
+
 // GET /api/settings
 router.get('/', async (req, res) => {
   try {
@@ -37,6 +80,7 @@ router.get('/', async (req, res) => {
 
     // En desarrollo, devolver settings por defecto
     if (process.env.NODE_ENV !== 'production' && userId === 'dev-user') {
+      // Cargar preferencias guardadas en localStorage del navegador si existen
       const devSettings = buildSettingsResponse({
         name: 'Desarrollo',
         email: 'dev@ristak.local',
@@ -47,7 +91,9 @@ router.get('/', async (req, res) => {
           user_name: 'Usuario Dev',
           user_email: 'dev@ristak.local',
           user_business_name: 'Ristak Dev',
-          user_ui_preferences: {}
+          user_ui_preferences: {
+            tables: {}
+          }
         }
       });
 
@@ -183,6 +229,50 @@ router.put('/', async (req, res) => {
   }
 });
 
+// GET /api/settings/preferences
+router.get('/preferences', async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized'
+      });
+    }
+
+    // En desarrollo, devolver preferencias vacías
+    if (process.env.NODE_ENV !== 'production' && userId === 'dev-user') {
+      return res.json({
+        success: true,
+        data: {}
+      });
+    }
+
+    const result = await databasePool.query(
+      'SELECT table_preferences FROM users WHERE id = $1 LIMIT 1',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result.rows[0].table_preferences || {}
+    });
+  } catch (error) {
+    console.error('[Settings] Failed to load table preferences:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load preferences'
+    });
+  }
+});
+
 // PUT /api/settings/preferences/:table
 router.put('/preferences/:tableName', async (req, res) => {
   try {
@@ -197,8 +287,20 @@ router.put('/preferences/:tableName', async (req, res) => {
     const { tableName } = req.params;
     const preferences = req.body || {};
 
+    // En desarrollo, simular guardado exitoso sin tocar la DB
+    if (process.env.NODE_ENV !== 'production' && userId === 'dev-user') {
+      console.log('[Settings Dev] Guardando preferencias de tabla:', tableName, preferences);
+      return res.json({
+        success: true,
+        data: {
+          [tableName]: preferences
+        }
+      });
+    }
+
+    // Obtener las preferencias actuales de la nueva columna table_preferences
     const result = await databasePool.query(
-      'SELECT settings FROM users WHERE id = $1 LIMIT 1',
+      'SELECT table_preferences FROM users WHERE id = $1 LIMIT 1',
       [userId]
     );
 
@@ -209,28 +311,21 @@ router.put('/preferences/:tableName', async (req, res) => {
       });
     }
 
-    const currentSettings = result.rows[0].settings || {};
-    const currentTables = {
-      ...(currentSettings.user_ui_preferences?.tables || {})
-    };
-    currentTables[tableName] = preferences;
+    // Obtener preferencias actuales o inicializar objeto vacío
+    const currentPreferences = result.rows[0].table_preferences || {};
 
-    const newSettings = {
-      ...currentSettings,
-      user_ui_preferences: {
-        ...(currentSettings.user_ui_preferences || {}),
-        tables: currentTables
-      }
-    };
+    // Actualizar solo la tabla específica
+    currentPreferences[tableName] = preferences;
 
+    // Guardar en la nueva columna table_preferences
     const updateResult = await databasePool.query(
-      'UPDATE users SET settings = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING settings',
-      [JSON.stringify(newSettings), userId]
+      'UPDATE users SET table_preferences = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING table_preferences',
+      [JSON.stringify(currentPreferences), userId]
     );
 
     res.json({
       success: true,
-      data: updateResult.rows[0].settings.user_ui_preferences || {}
+      data: updateResult.rows[0].table_preferences || {}
     });
   } catch (error) {
     console.error('[Settings] Failed to update table preferences:', error);

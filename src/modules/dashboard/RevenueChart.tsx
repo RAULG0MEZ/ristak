@@ -194,7 +194,14 @@ export function RevenueChart({
             <YAxis
               tick={{ fill: themeData.colors.text.tertiary, fontSize: 12 }}
               axisLine={{ stroke: themeData.colors.text.tertiary, opacity: 0.2 }}
-              tickFormatter={(value) => `${value / 1000}k`}
+              tickFormatter={(value, index) => {
+                // Ocultar el primer valor del eje Y para evitar solapamiento con eje X
+                if (index === 0) return ''
+                if (value >= 1000) {
+                  return `$${Math.round(value / 1000)}k`
+                }
+                return `$${Math.round(value)}`
+              }}
               domain={getYDomain()}
             />
             <SmartRechartsTooltip

@@ -1167,10 +1167,12 @@ export function Campaigns() {
                 <YAxis
                   tick={{ fill: themeData.colors.text.tertiary, fontSize: 12 }}
                   axisLine={{ stroke: themeData.colors.text.tertiary, opacity: 0.2 }}
-                  tickFormatter={(value) => {
-                    if (value >= 1000000) return `${(value / 1000000).toFixed(0)}M`
-                    if (value >= 1000) return `${(value / 1000).toFixed(0)}k`
-                    return value.toFixed(0)
+                  tickFormatter={(value, index) => {
+                    // Ocultar el primer valor del eje Y para evitar solapamiento con eje X
+                    if (index === 0) return ''
+                    if (value >= 1000000) return `$${Math.round(value / 1000000)}M`
+                    if (value >= 1000) return `$${Math.round(value / 1000)}k`
+                    return `$${Math.round(value)}`
                   }}
                   domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1)]}
                 />
@@ -1513,14 +1515,14 @@ export function Campaigns() {
               <div className="flex-1 overflow-y-auto scrollbar-thin">
                 {visitorsModal.loading ? (
                   <div className="flex flex-col items-center justify-center h-full p-8">
-                    <div className="w-12 h-12 rounded-xl glass-morphism flex items-center justify-center mb-3">
+                    <div className="w-12 h-12 flex items-center justify-center mb-3">
                       <Icons.refresh className="w-6 h-6 text-primary animate-spin" />
                     </div>
                     <p className="text-sm text-secondary">Cargando visitantes...</p>
                   </div>
                 ) : visitorsModal.data.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full p-8">
-                    <div className="w-12 h-12 rounded-xl glass-morphism flex items-center justify-center mb-3">
+                    <div className="w-12 h-12 flex items-center justify-center mb-3">
                       <Icons.users className="w-6 h-6 text-tertiary" />
                     </div>
                     <p className="text-sm text-secondary">No hay visitantes registrados</p>

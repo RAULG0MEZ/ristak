@@ -113,11 +113,11 @@ export function MetricsTables({ metrics, reportType, loading = false }: MetricsT
 
   // Componente de tabla individual
   const MetricTable = ({ column }: { column: typeof metricsColumns[0] }) => (
-    <Card variant="glass" className="h-full">
-      <div className="p-4 border-b border-primary">
+    <Card variant="glass" className="h-full" noPadding>
+      <div className="p-4 border-b border-primary text-center">
         <h3 className="text-sm font-semibold text-primary">{column.title}</h3>
       </div>
-      
+
       {loading ? (
         <div className="p-4">
           <SkeletonLoader variant="table" rows={7} columns={2} />
@@ -126,14 +126,14 @@ export function MetricsTables({ metrics, reportType, loading = false }: MetricsT
         <Table fluid>
           <TableHeader>
             <TableRow>
-              <TableHead className="text-xs">Métrica</TableHead>
-              <TableHead className="text-xs text-right">Valor</TableHead>
+              <TableHead className="text-xs py-2 px-4 text-left">Métrica</TableHead>
+              <TableHead className="text-xs py-2 px-4 text-right">Valor</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {column.items.map((item, idx) => (
               <TableRow key={idx} className="glass-hover">
-                <TableCell className="py-2">
+                <TableCell className="py-2 px-4 text-left">
                   <div>
                     <div className="text-sm font-medium text-primary">
                       {item.label}
@@ -143,7 +143,7 @@ export function MetricsTables({ metrics, reportType, loading = false }: MetricsT
                     </div>
                   </div>
                 </TableCell>
-                <TableCell className="text-right text-sm font-medium py-2 text-secondary">
+                <TableCell className="py-2 px-4 text-right text-sm font-medium text-secondary">
                   {item.value}
                 </TableCell>
               </TableRow>

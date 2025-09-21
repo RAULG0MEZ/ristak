@@ -380,26 +380,8 @@ export function Contacts() {
           />
         </div>
 
-        {/* Bulk Actions */}
-        {selectedContacts.size > 0 && (
-          <div className="px-4 py-2 glass rounded-lg">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-info">
-                {selectedContacts.size} contacto{selectedContacts.size !== 1 ? 's' : ''} seleccionado{selectedContacts.size !== 1 ? 's' : ''}
-              </span>
-              <button
-                className="text-sm text-error hover:text-error-hover transition-colors"
-                onClick={() => setBulkDeleteModal({ isOpen: true })}
-              >
-                <Icons.trash2 className="w-4 h-4 inline mr-1" />
-                Eliminar seleccionados
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Contacts Table */}
-        <div className="space-y-0">
+        <div className="space-y-4">
           <TableWithControls
             columns={columns}
             data={filteredContacts.map(c => ({ ...c, _selected: selectedContacts.has(c.id) }))}
@@ -417,6 +399,24 @@ export function Contacts() {
                 onChange: setActiveTab
               }
             ]}
+            additionalControls={
+              selectedContacts.size > 0 ? (
+                <div className="px-4 py-2 glass rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-info">
+                      {selectedContacts.size} contacto{selectedContacts.size !== 1 ? 's' : ''} seleccionado{selectedContacts.size !== 1 ? 's' : ''}
+                    </span>
+                    <button
+                      className="text-sm text-error hover:text-error-hover transition-colors"
+                      onClick={() => setBulkDeleteModal({ isOpen: true })}
+                    >
+                      <Icons.trash2 className="w-4 h-4 inline mr-1" />
+                      Eliminar seleccionados
+                    </button>
+                  </div>
+                </div>
+              ) : null
+            }
             onSort={handleSort}
             sortColumn={sortColumn}
             sortDirection={sortDirection}

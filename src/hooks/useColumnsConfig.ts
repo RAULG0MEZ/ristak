@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { getApiUrl, fetchWithAuth } from '../config/api'
 
 // Este hook SOLO maneja orden y visibilidad de columnas
 // NO debe cachear funciones render ni otros datos que cambien
@@ -21,30 +22,63 @@ interface Column {
 }
 
 export function useColumnsConfig(storageKey: string, columns: Column[]) {
-  // Este hook SOLO guarda configuración de orden y visibilidad
-  // Las columnas con sus renders vienen frescas del componente padre
+  // Este hook usa la nueva columna table_preferences de la DB
+  // Usa localStorage como caché temporal para respuesta rápida
+  const [savedConfig, setSavedConfig] = useState<ColumnConfig[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  // Cargar solo orden y visibilidad desde localStorage
-  const loadConfig = useCallback((): ColumnConfig[] => {
-    const saved = localStorage.getItem(storageKey)
-    if (saved) {
+  // Cargar configuración desde la API al inicio
+  useEffect(() => {
+    const loadPreferences = async () => {
       try {
-        const parsed = JSON.parse(saved) as ColumnConfig[]
-        return parsed
-      } catch (e) {
-        console.error('Error loading columns config:', e)
-        return []
+        // Primero cargar desde localStorage como caché rápido
+        const cached = localStorage.getItem(storageKey)
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached) as ColumnConfig[]
+            setSavedConfig(parsed)
+          } catch {}
+        }
+
+        // Luego sincronizar con la DB
+        const response = await fetchWithAuth(getApiUrl('/settings/preferences'))
+        if (response.ok) {
+          const data = await response.json()
+          const tablePrefs = data?.data?.[storageKey]
+          if (tablePrefs && Array.isArray(tablePrefs)) {
+            setSavedConfig(tablePrefs)
+            // Actualizar caché local
+            localStorage.setItem(storageKey, JSON.stringify(tablePrefs))
+          }
+        }
+      } catch (error) {
+        console.error('Error loading table preferences:', error)
+      } finally {
+        setIsLoading(false)
       }
     }
-    return []
+    loadPreferences()
   }, [storageKey])
 
-  const [savedConfig, setSavedConfig] = useState<ColumnConfig[]>(() => loadConfig())
-
-  // Guardar solo orden y visibilidad en localStorage
-  const saveConfig = useCallback((config: ColumnConfig[]) => {
+  // Guardar en DB y localStorage
+  const saveConfig = useCallback(async (config: ColumnConfig[]) => {
+    // Guardar inmediatamente en localStorage para respuesta instantánea
     localStorage.setItem(storageKey, JSON.stringify(config))
     setSavedConfig(config)
+
+    // Luego sincronizar con la DB (nueva columna table_preferences)
+    try {
+      await fetchWithAuth(getApiUrl(`/settings/preferences/${storageKey}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(config)
+      })
+    } catch (error) {
+      console.error('Error saving table preferences to DB:', error)
+      // El localStorage ya tiene los cambios, así que el usuario no pierde nada
+    }
   }, [storageKey])
 
   // Aplicar configuración guardada a las columnas frescas del padre
@@ -99,15 +133,29 @@ export function useColumnsConfig(storageKey: string, columns: Column[]) {
   }, [saveConfig])
 
   // Reset a configuración por defecto
-  const resetColumns = useCallback(() => {
+  const resetColumns = useCallback(async () => {
     localStorage.removeItem(storageKey)
     setSavedConfig([])
+
+    // También limpiar en la DB
+    try {
+      await fetchWithAuth(getApiUrl(`/settings/preferences/${storageKey}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([])
+      })
+    } catch (error) {
+      console.error('Error resetting table preferences:', error)
+    }
   }, [storageKey])
 
   return {
     columns: configuredColumns(),
     handleColumnReorder,
     handleColumnVisibilityChange,
-    resetColumns
+    resetColumns,
+    isLoading
   }
 }

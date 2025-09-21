@@ -28,13 +28,7 @@ export function FunnelChart() {
         {/* Header minimalista */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h3 className="text-lg font-semibold text-primary">Funnel de Conversión</h3>
-            <div className="flex items-baseline gap-2 mt-2">
-              <span className="text-3xl font-bold text-primary">
-                {totalConversion}%
-              </span>
-              <span className="text-sm text-tertiary">tasa total</span>
-            </div>
+            <h3 className="text-lg font-semibold text-primary">Funnel</h3>
           </div>
           <button className="p-2 glass-hover rounded-xl transition-colors">
             <Icons.more className="w-4 h-4 text-tertiary" />
@@ -122,9 +116,12 @@ export function FunnelChart() {
               </p>
             </div>
             <div>
-              <p className="text-xs text-tertiary mb-1">Oportunidad</p>
-              <p className="text-sm font-semibold text-primary truncate">
-                +{((data[0].value - data[1].value) * 0.1).toFixed(0)} leads potenciales
+              <p className="text-xs text-tertiary mb-1">Citas a Ventas</p>
+              <p className="text-sm font-semibold text-primary">
+                <span className="block sm:inline">Citas → Clientes</span>
+                <span className="text-success sm:ml-2">
+                  {data[2].value > 0 ? ((data[3].value / data[2].value) * 100).toFixed(1) : '0'}%
+                </span>
               </p>
             </div>
           </div>

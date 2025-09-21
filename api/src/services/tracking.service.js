@@ -288,15 +288,22 @@ class TrackingService {
     // Prioridad 4: Referrer
     if (referrerDomain) {
       const domain = referrerDomain.toLowerCase();
-      // Social networks
-      if (domain.includes('facebook.com') || domain.includes('instagram.com') ||
-          domain.includes('twitter.com') || domain.includes('linkedin.com') ||
-          domain.includes('tiktok.com') || domain.includes('youtube.com')) {
+
+      // Social networks - Ahora configurable desde variables de entorno si es necesario
+      const socialDomains = process.env.SOCIAL_DOMAINS ?
+        process.env.SOCIAL_DOMAINS.split(',') :
+        ['facebook.com', 'instagram.com', 'twitter.com', 'linkedin.com', 'tiktok.com', 'youtube.com'];
+
+      if (socialDomains.some(social => domain.includes(social))) {
         return 'social';
       }
-      // Search engines
-      if (domain.includes('google.') || domain.includes('bing.com') ||
-          domain.includes('yahoo.com') || domain.includes('duckduckgo.com')) {
+
+      // Search engines - También configurable
+      const searchDomains = process.env.SEARCH_DOMAINS ?
+        process.env.SEARCH_DOMAINS.split(',') :
+        ['google.', 'bing.com', 'yahoo.com', 'duckduckgo.com'];
+
+      if (searchDomains.some(search => domain.includes(search))) {
         return 'organic';
       }
       // Otro referrer

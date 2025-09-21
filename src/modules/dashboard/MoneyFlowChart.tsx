@@ -80,7 +80,12 @@ export function MoneyFlowChart() {
             <YAxis
               tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }}
               axisLine={{ stroke: 'var(--color-background-glassBorder)' }}
-              tickFormatter={(value) => value >= 1000 ? `${(value/1000).toFixed(0)}k` : value.toString()}
+              tickFormatter={(value, index) => {
+                // Ocultar el primer valor del eje Y para evitar solapamiento con eje X
+                if (index === 0) return ''
+                if (value >= 1000) return `$${Math.round(value/1000)}k`
+                return `$${Math.round(value)}`
+              }}
             />
             <SmartRechartsTooltip
               content={<CustomTooltip />}
@@ -124,6 +129,11 @@ export function MoneyFlowChart() {
               orientation="right"
               tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
               axisLine={{ stroke: 'var(--color-background-glassBorder)' }}
+              tickFormatter={(value, index) => {
+                // Ocultar el primer valor del eje Y para evitar solapamiento
+                if (index === 0) return ''
+                return Math.round(value).toString()
+              }}
             />
           </LineChart>
         </ResponsiveContainer>

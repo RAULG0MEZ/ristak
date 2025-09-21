@@ -281,14 +281,14 @@ export function ContactDetailsModal({
             <div className="flex-1 overflow-y-auto scrollbar-thin">
               {loading ? (
                 <div className="flex flex-col items-center justify-center h-full p-8">
-                  <div className="w-12 h-12 rounded-xl glass-morphism flex items-center justify-center mb-3">
+                  <div className="w-12 h-12 flex items-center justify-center mb-3">
                     <Icons.refresh className="w-6 h-6 text-primary animate-spin" />
                   </div>
                   <p className="text-sm text-secondary">Cargando elementos...</p>
                 </div>
               ) : filteredData.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full p-8">
-                  <div className="w-12 h-12 rounded-xl glass-morphism flex items-center justify-center mb-3">
+                  <div className="w-12 h-12 flex items-center justify-center mb-3">
                     <Icons.users className="w-6 h-6 text-tertiary" />
                   </div>
                   <p className="text-sm text-secondary">

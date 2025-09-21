@@ -292,9 +292,6 @@ export function TableWithControls({
                 ) : null}
               </div>
             ))}
-
-            {/* Controles adicionales */}
-            {additionalControls}
           </div>
           
           {/* Edit Mode Toggle */}
@@ -318,6 +315,9 @@ export function TableWithControls({
           </Button>
         </div>
       </Card>
+
+      {/* Controles adicionales (bulk actions, etc) */}
+      {additionalControls}
 
       {/* Tabla con modo edición */}
       <Card variant="glass" noPadding>

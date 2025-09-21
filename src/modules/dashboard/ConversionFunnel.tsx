@@ -45,7 +45,7 @@ export function ConversionFunnel() {
   return (
     <Card variant="glass" className="p-4">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-white">Embudo de Conversión</h3>
+        <h3 className="text-lg font-semibold text-white">Embudo</h3>
         <Icons.filter className="w-4 h-4 text-gray-400" />
       </div>
 

@@ -28,19 +28,19 @@ export function Settings() {
   const [activeSection, setActiveSection] = useState('account')
   const [copiedText, setCopiedText] = useState('')
   
-  // Account IDs state
+  // Account IDs state - Se cargarán dinámicamente desde el backend
   const [accountConfig, setAccountConfig] = useState({
-    webhook_base_url: 'https://send.hollytrack.com',
+    webhook_base_url: '',
     webhook_endpoints: {
-      contacts: 'https://send.hollytrack.com/webhook/contacts',
-      appointments: 'https://send.hollytrack.com/webhook/appointments',
-      payments: 'https://send.hollytrack.com/webhook/payments',
-      refunds: 'https://send.hollytrack.com/webhook/refunds'
+      contacts: '',
+      appointments: '',
+      payments: '',
+      refunds: ''
     },
     tracking: {
-      host: 'ilove.hollytrack.com',
-      snippet_url: 'https://ilove.hollytrack.com/snip.js',
-      snippet_code: '<script defer src="https://ilove.hollytrack.com/snip.js"></script>'
+      host: '',
+      snippet_url: '',
+      snippet_code: ''
     },
     account: {
       id: ''
@@ -98,15 +98,21 @@ export function Settings() {
   useEffect(() => {
     let mounted = true; // Flag para evitar actualizaciones después de desmontar
 
-    // Load account IDs configuration
-    fetchWithAuth(getApiUrl('/config/account-config'))
+    // Load account IDs configuration - ahora desde settings/domains-config con variables de entorno
+    fetchWithAuth(getApiUrl('/settings/domains-config'))
       .then(r => r.json())
       .then(res => {
         if (mounted && res?.data) {
-          setAccountConfig(res.data)
+          // Combinar la configuración de dominios con el account existente
+          setAccountConfig(prev => ({
+            ...res.data,
+            account: prev.account || { id: '' }
+          }))
         }
       })
-      .catch(() => {})
+      .catch((error) => {
+        console.error('Error cargando configuración de dominios:', error)
+      })
       .finally(() => {
         if (mounted) {
           setIsAccountConfigLoading(false)

@@ -66,43 +66,136 @@ class CampaignsService {
         WHERE date >= $1 AND date <= $2
       `;
 
+      // NUEVA LÓGICA CON TRACKING.SESSIONS + FALLBACK para leads
       const leadsQuery = `
-        SELECT COUNT(*) AS leads
-        FROM contacts c
-        WHERE c.created_at >= $1 AND c.created_at <= $2
-          AND c.attribution_ad_id IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM meta.meta_ads ma
-            WHERE ma.ad_id = c.attribution_ad_id
-              AND (
-                ma.date::date = c.created_at::date
-                OR (
-                  ma.date::date >= (c.created_at::date - INTERVAL '3 days')
-                  AND ma.date::date <= c.created_at::date
+        WITH session_attribution AS (
+          -- Para cada contacto con visitor_id, buscar su última sesión antes de convertir
+          SELECT DISTINCT ON (c.contact_id)
+            c.contact_id
+          FROM contacts c
+          INNER JOIN tracking.sessions s ON s.visitor_id = c.visitor_id
+          WHERE c.visitor_id IS NOT NULL
+            AND c.created_at >= $1 AND c.created_at <= $2
+            AND s.started_at < c.created_at  -- Sesión ANTES de convertir
+            AND s.ad_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM meta.meta_ads ma
+              WHERE ma.ad_id = s.ad_id
+            )
+            AND (
+              LOWER(COALESCE(s.channel, '')) LIKE ANY($3::text[])
+              OR LOWER(COALESCE(s.source_platform, '')) LIKE ANY($3::text[])
+              OR LOWER(COALESCE(s.utm_source, '')) LIKE ANY($3::text[])
+            )
+          ORDER BY c.contact_id, s.started_at DESC  -- Última sesión por contacto
+        ),
+        fallback_attribution AS (
+          -- Fallback: usar attribution_ad_id para contactos sin sesiones o visitor_id
+          SELECT
+            c.contact_id
+          FROM contacts c
+          WHERE c.attribution_ad_id IS NOT NULL
+            AND c.created_at >= $1 AND c.created_at <= $2
+            AND NOT EXISTS (
+              SELECT 1 FROM session_attribution sa
+              WHERE sa.contact_id = c.contact_id
+            )
+            AND EXISTS (
+              SELECT 1 FROM meta.meta_ads ma
+              WHERE ma.ad_id = c.attribution_ad_id
+                AND (
+                  ma.date::date = c.created_at::date
+                  OR (
+                    ma.date::date >= (c.created_at::date - INTERVAL '3 days')
+                    AND ma.date::date <= c.created_at::date
+                  )
                 )
-              )
-          )
+            )
+        )
+        SELECT COUNT(*) AS leads
+        FROM (
+          SELECT contact_id FROM session_attribution
+          UNION ALL
+          SELECT contact_id FROM fallback_attribution
+        ) all_attributions
       `;
 
+      // NUEVA LÓGICA CON TRACKING.SESSIONS + FALLBACK para sales
       const salesQuery = `
-        SELECT
-          COUNT(DISTINCT p.contact_id) AS sales,
-          COALESCE(SUM(p.amount), 0) AS revenue
-        FROM contacts c
-        JOIN payments p ON p.contact_id = c.contact_id AND p.status = 'completed'
-        WHERE c.created_at >= $1 AND c.created_at <= $2
-          AND c.attribution_ad_id IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM meta.meta_ads ma
-            WHERE ma.ad_id = c.attribution_ad_id
-              AND (
-                ma.date::date = c.created_at::date
-                OR (
-                  ma.date::date >= (c.created_at::date - INTERVAL '3 days')
-                  AND ma.date::date <= c.created_at::date
+        WITH session_attribution AS (
+          -- Para cada contacto con pagos y visitor_id, buscar su última sesión antes de convertir
+          SELECT DISTINCT ON (c.contact_id)
+            c.contact_id
+          FROM contacts c
+          INNER JOIN tracking.sessions s ON s.visitor_id = c.visitor_id
+          WHERE c.visitor_id IS NOT NULL
+            AND c.created_at >= $1 AND c.created_at <= $2
+            AND s.started_at < c.created_at  -- Sesión ANTES del created_at
+            AND s.ad_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM payments p
+              WHERE p.contact_id = c.contact_id
+              AND p.status = 'completed'
+            )
+            AND EXISTS (
+              SELECT 1 FROM meta.meta_ads ma
+              WHERE ma.ad_id = s.ad_id
+            )
+            AND (
+              LOWER(COALESCE(s.channel, '')) LIKE ANY($3::text[])
+              OR LOWER(COALESCE(s.source_platform, '')) LIKE ANY($3::text[])
+              OR LOWER(COALESCE(s.utm_source, '')) LIKE ANY($3::text[])
+            )
+          ORDER BY c.contact_id, s.started_at DESC  -- Última sesión por contacto
+        ),
+        fallback_attribution AS (
+          -- Fallback: usar attribution_ad_id para contactos sin sesiones o visitor_id
+          SELECT
+            c.contact_id
+          FROM contacts c
+          WHERE c.attribution_ad_id IS NOT NULL
+            AND c.created_at >= $1 AND c.created_at <= $2
+            AND EXISTS (
+              SELECT 1 FROM payments p
+              WHERE p.contact_id = c.contact_id
+              AND p.status = 'completed'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM session_attribution sa
+              WHERE sa.contact_id = c.contact_id
+            )
+            AND EXISTS (
+              SELECT 1 FROM meta.meta_ads ma
+              WHERE ma.ad_id = c.attribution_ad_id
+                AND (
+                  ma.date::date = c.created_at::date
+                  OR (
+                    ma.date::date >= (c.created_at::date - INTERVAL '3 days')
+                    AND ma.date::date <= c.created_at::date
+                  )
                 )
-              )
-          )
+            )
+        ),
+        all_attributions AS (
+          -- Combinar ambas fuentes
+          SELECT contact_id FROM session_attribution
+          UNION ALL
+          SELECT contact_id FROM fallback_attribution
+        ),
+        -- Obtener los montos de pagos para los contactos atribuidos
+        attributed_sales AS (
+          SELECT
+            aa.contact_id,
+            COALESCE(SUM(p.amount), 0) AS revenue
+          FROM all_attributions aa
+          INNER JOIN payments p ON p.contact_id = aa.contact_id
+          WHERE p.status = 'completed'
+          GROUP BY aa.contact_id
+        )
+        SELECT
+          COUNT(DISTINCT contact_id) AS sales,
+          COALESCE(SUM(revenue), 0) AS revenue
+        FROM attributed_sales
       `;
 
       const [
@@ -115,10 +208,10 @@ class CampaignsService {
       ] = await Promise.all([
         databasePool.query(metaQuery, [normalizedStart, normalizedEnd]),
         databasePool.query(metaQuery, [previousStartDate, previousEndDate]),
-        databasePool.query(leadsQuery, [normalizedStart, normalizedEnd]),
-        databasePool.query(leadsQuery, [previousStartDate, previousEndDate]),
-        databasePool.query(salesQuery, [normalizedStart, normalizedEnd]),
-        databasePool.query(salesQuery, [previousStartDate, previousEndDate])
+        databasePool.query(leadsQuery, [normalizedStart, normalizedEnd, META_SOURCE_PATTERNS]),
+        databasePool.query(leadsQuery, [previousStartDate, previousEndDate, META_SOURCE_PATTERNS]),
+        databasePool.query(salesQuery, [normalizedStart, normalizedEnd, META_SOURCE_PATTERNS]),
+        databasePool.query(salesQuery, [previousStartDate, previousEndDate, META_SOURCE_PATTERNS])
       ]);
 
       const currentMeta = currentMetaRes.rows[0] || {};
@@ -207,6 +300,7 @@ class CampaignsService {
       )
 
       // 2) Visitors from tracking sessions - SOLO DE FACEBOOK/META
+      // IMPORTANTE: Contamos visitantes ÚNICOS por día (si alguien visita lunes Y martes, cuenta como 2)
       const visitorsRes = await databasePool.query(
         `WITH filtered_sessions AS (
            SELECT
@@ -232,78 +326,193 @@ class CampaignsService {
         [startDate, endDate, META_SOURCE_PATTERNS]
       )
 
-      // 3) Leads from contacts - FILTRADO POR TENANT
+      // 3) Leads from contacts - NUEVA LÓGICA CON TRACKING.SESSIONS + FALLBACK
+      // Primero intentamos con tracking.sessions, si no hay datos usamos attribution_ad_id
       const leadsRes = await databasePool.query(
-        `SELECT c.attribution_ad_id AS ad_id, COUNT(*) AS leads
-         FROM contacts c
-         WHERE c.attribution_ad_id IS NOT NULL
-           AND c.created_at >= $1
-           AND c.created_at <= $2
-           AND EXISTS (
-             SELECT 1 FROM meta.meta_ads ma
-             WHERE ma.ad_id = c.attribution_ad_id
-               AND (
-                 ma.date::date = c.created_at::date
-                 OR (
-                   ma.date::date >= (c.created_at::date - INTERVAL '3 days')
-                   AND ma.date::date <= c.created_at::date
-                 )
-               )
-           )
-         GROUP BY c.attribution_ad_id
+        `WITH session_attribution AS (
+           -- Para cada contacto con visitor_id, buscar su última sesión antes de convertir
+           SELECT DISTINCT ON (c.contact_id)
+             c.contact_id,
+             s.ad_id
+           FROM contacts c
+           INNER JOIN tracking.sessions s ON s.visitor_id = c.visitor_id
+           WHERE c.visitor_id IS NOT NULL
+             AND c.created_at >= $1
+             AND c.created_at <= $2
+             AND s.started_at < c.created_at  -- Sesión ANTES de convertir
+             AND s.ad_id IS NOT NULL
+             AND (
+               LOWER(COALESCE(s.channel, '')) LIKE ANY($3::text[])
+               OR LOWER(COALESCE(s.source_platform, '')) LIKE ANY($3::text[])
+               OR LOWER(COALESCE(s.utm_source, '')) LIKE ANY($3::text[])
+             )
+           ORDER BY c.contact_id, s.started_at DESC  -- Última sesión por contacto
+         ),
+         fallback_attribution AS (
+           -- Fallback: usar attribution_ad_id para contactos sin sesiones o visitor_id
+           SELECT
+             c.contact_id,
+             c.attribution_ad_id AS ad_id
+           FROM contacts c
+           WHERE c.attribution_ad_id IS NOT NULL
+             AND c.created_at >= $1
+             AND c.created_at <= $2
+             AND NOT EXISTS (
+               SELECT 1 FROM session_attribution sa
+               WHERE sa.contact_id = c.contact_id
+             )
+         ),
+         all_attributions AS (
+           -- Combinar ambas fuentes
+           SELECT ad_id FROM session_attribution
+           UNION ALL
+           SELECT ad_id FROM fallback_attribution
+         )
+         SELECT
+           aa.ad_id,
+           COUNT(*) AS leads
+         FROM all_attributions aa
+         WHERE EXISTS (
+           SELECT 1 FROM meta.meta_ads ma
+           WHERE ma.ad_id = aa.ad_id
+         )
+         GROUP BY aa.ad_id
         `,
-        [startDate, endDate]
+        [startDate, endDate, META_SOURCE_PATTERNS]
       )
 
-      // 4) Appointments - FILTRADO POR TENANT
+      // 4) Appointments - NUEVA LÓGICA CON TRACKING.SESSIONS + FALLBACK
+      // Basamos la atribución en contacts.created_at, no en cuando se agendó la cita
       const apptsRes = await databasePool.query(
-        `SELECT c.attribution_ad_id AS ad_id, COUNT(DISTINCT a.contact_id) AS appointments
-         FROM appointments a
-         JOIN contacts c ON a.contact_id = c.contact_id
-         WHERE c.attribution_ad_id IS NOT NULL
-           AND c.created_at >= $1
-           AND c.created_at <= $2
-           AND EXISTS (
-             SELECT 1 FROM meta.meta_ads ma
-             WHERE ma.ad_id = c.attribution_ad_id
-               AND (
-                 ma.date::date = c.created_at::date
-                 OR (
-                   ma.date::date >= (c.created_at::date - INTERVAL '3 days')
-                   AND ma.date::date <= c.created_at::date
-                 )
-               )
-           )
-         GROUP BY c.attribution_ad_id
+        `WITH session_attribution AS (
+           -- Para cada contacto con citas y visitor_id, buscar su última sesión antes de convertir
+           SELECT DISTINCT ON (c.contact_id)
+             c.contact_id,
+             s.ad_id
+           FROM appointments a
+           INNER JOIN contacts c ON a.contact_id = c.contact_id
+           INNER JOIN tracking.sessions s ON s.visitor_id = c.visitor_id
+           WHERE c.visitor_id IS NOT NULL
+             AND c.created_at >= $1
+             AND c.created_at <= $2
+             AND s.started_at < c.created_at  -- Sesión ANTES del created_at del contacto
+             AND s.ad_id IS NOT NULL
+             AND (
+               LOWER(COALESCE(s.channel, '')) LIKE ANY($3::text[])
+               OR LOWER(COALESCE(s.source_platform, '')) LIKE ANY($3::text[])
+               OR LOWER(COALESCE(s.utm_source, '')) LIKE ANY($3::text[])
+             )
+           ORDER BY c.contact_id, s.started_at DESC  -- Última sesión por contacto
+         ),
+         fallback_attribution AS (
+           -- Fallback: usar attribution_ad_id para contactos sin sesiones o visitor_id
+           SELECT
+             c.contact_id,
+             c.attribution_ad_id AS ad_id
+           FROM appointments a
+           INNER JOIN contacts c ON a.contact_id = c.contact_id
+           WHERE c.attribution_ad_id IS NOT NULL
+             AND c.created_at >= $1
+             AND c.created_at <= $2
+             AND NOT EXISTS (
+               SELECT 1 FROM session_attribution sa
+               WHERE sa.contact_id = c.contact_id
+             )
+         ),
+         all_attributions AS (
+           -- Combinar ambas fuentes
+           SELECT contact_id, ad_id FROM session_attribution
+           UNION ALL
+           SELECT contact_id, ad_id FROM fallback_attribution
+         )
+         SELECT
+           aa.ad_id,
+           COUNT(DISTINCT aa.contact_id) AS appointments
+         FROM all_attributions aa
+         WHERE EXISTS (
+           SELECT 1 FROM meta.meta_ads ma
+           WHERE ma.ad_id = aa.ad_id
+         )
+         GROUP BY aa.ad_id
         `,
-        [startDate, endDate]
+        [startDate, endDate, META_SOURCE_PATTERNS]
       )
 
-      // 5) Sales/Revenue - FILTRADO POR TENANT
+      // 5) Sales/Revenue - NUEVA LÓGICA CON TRACKING.SESSIONS + FALLBACK
+      // Basamos la atribución en contacts.created_at, no en payments.paid_at
       const salesRes = await databasePool.query(
-        `SELECT c.attribution_ad_id AS ad_id,
-                COUNT(DISTINCT p.contact_id) AS sales,
-                COALESCE(SUM(p.amount),0) AS revenue
-         FROM contacts c
-         JOIN payments p ON p.contact_id = c.contact_id
-         WHERE c.attribution_ad_id IS NOT NULL
-           AND p.status = 'completed'
-           AND c.created_at >= $1
-           AND c.created_at <= $2
-           AND EXISTS (
-             SELECT 1 FROM meta.meta_ads ma
-             WHERE ma.ad_id = c.attribution_ad_id
-               AND (
-                 ma.date::date = c.created_at::date
-                 OR (
-                   ma.date::date >= (c.created_at::date - INTERVAL '3 days')
-                   AND ma.date::date <= c.created_at::date
-                 )
-               )
-           )
-         GROUP BY c.attribution_ad_id
+        `WITH session_attribution AS (
+           -- Para cada contacto con pagos y visitor_id, buscar su última sesión antes de convertir
+           SELECT DISTINCT ON (c.contact_id)
+             c.contact_id,
+             s.ad_id
+           FROM contacts c
+           INNER JOIN tracking.sessions s ON s.visitor_id = c.visitor_id
+           WHERE c.visitor_id IS NOT NULL
+             AND c.created_at >= $1
+             AND c.created_at <= $2
+             AND s.started_at < c.created_at  -- Sesión ANTES del created_at del contacto
+             AND s.ad_id IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM payments p
+               WHERE p.contact_id = c.contact_id
+               AND p.status = 'completed'
+             )
+             AND (
+               LOWER(COALESCE(s.channel, '')) LIKE ANY($3::text[])
+               OR LOWER(COALESCE(s.source_platform, '')) LIKE ANY($3::text[])
+               OR LOWER(COALESCE(s.utm_source, '')) LIKE ANY($3::text[])
+             )
+           ORDER BY c.contact_id, s.started_at DESC  -- Última sesión por contacto
+         ),
+         fallback_attribution AS (
+           -- Fallback: usar attribution_ad_id para contactos sin sesiones o visitor_id
+           SELECT
+             c.contact_id,
+             c.attribution_ad_id AS ad_id
+           FROM contacts c
+           WHERE c.attribution_ad_id IS NOT NULL
+             AND c.created_at >= $1
+             AND c.created_at <= $2
+             AND EXISTS (
+               SELECT 1 FROM payments p
+               WHERE p.contact_id = c.contact_id
+               AND p.status = 'completed'
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM session_attribution sa
+               WHERE sa.contact_id = c.contact_id
+             )
+         ),
+         all_attributions AS (
+           -- Combinar ambas fuentes
+           SELECT contact_id, ad_id FROM session_attribution
+           UNION ALL
+           SELECT contact_id, ad_id FROM fallback_attribution
+         ),
+         -- Obtener los montos de pagos para los contactos atribuidos
+         attributed_sales AS (
+           SELECT
+             aa.ad_id,
+             aa.contact_id,
+             COALESCE(SUM(p.amount), 0) AS revenue
+           FROM all_attributions aa
+           INNER JOIN payments p ON p.contact_id = aa.contact_id
+           WHERE p.status = 'completed'
+           GROUP BY aa.ad_id, aa.contact_id
+         )
+         SELECT
+           ads.ad_id,
+           COUNT(DISTINCT ads.contact_id) AS sales,
+           COALESCE(SUM(ads.revenue), 0) AS revenue
+         FROM attributed_sales ads
+         WHERE EXISTS (
+           SELECT 1 FROM meta.meta_ads ma
+           WHERE ma.ad_id = ads.ad_id
+         )
+         GROUP BY ads.ad_id
         `,
-        [startDate, endDate]
+        [startDate, endDate, META_SOURCE_PATTERNS]
       )
 
       // Mapear resultados por ad_id
@@ -781,6 +990,7 @@ class CampaignsService {
         return [];
       }
 
+      // IMPORTANTE: Agrupamos por visitor_id, ad_id Y fecha para obtener visitantes únicos por día
       const query = `
         WITH filtered_sessions AS (
           SELECT

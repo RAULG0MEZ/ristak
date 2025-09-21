@@ -217,7 +217,6 @@ do_not_track:"1"===navigator.doNotTrack||"1"===window.doNotTrack||"1"===navigato
 // Google Analytics
 ga_client_id:l("_ga")?l("_ga").replace(/^GA\\d+\\.\\d+\\./,""):null,
 ga_session_id:c("ga_session_id"),
-ga_session_number:c("ga_session_number"),
 // Geolocalización (si viene en params)
 country:c("country"),
 region:c("region"),
@@ -313,7 +312,7 @@ router.post('/collect', async (req, res) => {
     // IDs básicos - REQUERIDOS del frontend
     const visitorId = data.vid;
     const sessionId = data.sess;
-    const sessionNumber = data.session_num || 1;
+    // Ya no necesitamos session_number
 
     // Validación básica - AMBOS IDs son requeridos
     if (!visitorId || !sessionId) {
@@ -399,18 +398,15 @@ router.post('/collect', async (req, res) => {
       do_not_track: data.do_not_track
     };
 
-    // CAMBIADO: Cada pageview es una nueva fila, no un UPDATE
-    // Agregamos un ID único para cada pageview manteniendo el session_id para agrupar
-    const pageviewId = `${sessionId}_${Date.now()}`; // ID único para cada pageview
+    // CAMBIADO: Cada pageview es una nueva fila con session_id único
+    // session_id ahora es el ID único para cada evento/pageview
 
-    // Query modificado - ahora SIEMPRE inserta nueva fila
+    // Query modificado - session_id es ahora la llave primaria
     const query = `
       INSERT INTO tracking.sessions (
-        id,                  -- ID único para cada pageview
-        session_id,          -- ID compartido de la sesión
+        session_id,          -- ID único para cada evento/pageview
         visitor_id,
         contact_id,
-        session_number,
         event_name,
         started_at,
         ended_at,
@@ -499,7 +495,6 @@ router.post('/collect', async (req, res) => {
         geo_city,
         ga_client_id,
         ga_session_id,
-        ga_session_number,
         pageviews_count,     -- Será 1 para cada fila individual
         events_count,
         is_bounce,
@@ -522,133 +517,130 @@ router.post('/collect', async (req, res) => {
         properties
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
-        $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-        $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62,
-        $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97, $98, $99,
-        $100, $101, $102, $103, $104, $105, $106, $107, $108, $109, $110, $111, $112, $113, $114
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+        $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
+        $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60,
+        $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97,
+        $98, $99, $100, $101, $102, $103, $104, $105, $106, $107, $108, $109, $110, $111
       )
     `;
 
-    // Preparar valores para TODOS los campos (114 parámetros ahora con el ID)
+    // Preparar valores para TODOS los campos (ahora 111 parámetros sin id, session_number y ga_session_number)
     await databasePool.query(query, [
-      pageviewId,                         // $1 id (único para cada pageview)
-      sessionId,                          // $2 session_id (compartido en la sesión)
-      visitorId,                          // $3 visitor_id
-      null,                               // $4 contact_id (se actualiza después)
-      sessionNumber,                      // $5 session_number
-      data.event || 'page_view',         // $6 event_name
-      new Date().toISOString(),          // $7 started_at (UTC)
-      null,                               // $8 ended_at
-      new Date().toISOString(),          // $9 last_event_at (UTC)
-      new Date().toISOString(),          // $10 created_at (UTC)
-      0,                                  // $11 duration_seconds
-      data.url || null,                   // $12 landing_url (ahora es la URL actual)
-      urlData.host,                       // $13 landing_host
-      urlData.path,                       // $14 landing_path
-      urlData.query,                      // $15 landing_query
-      urlData.fragment,                   // $16 landing_fragment
-      data.ref || null,                   // $17 referrer_url
-      referrerData.domain || null,        // $18 referrer_domain
-      data.utm_source || null,            // $19 utm_source
-      data.utm_medium || null,            // $20 utm_medium
-      data.utm_campaign || null,          // $21 utm_campaign
-      data.utm_term || null,              // $22 utm_term
-      data.utm_content || null,           // $23 utm_content
-      data.utm_id || null,                // $24 utm_id
-      data.fbclid || null,                // $25 fbclid
-      data.fbc || null,                   // $26 fbc
-      data.fbp || null,                   // $27 fbp
-      data.gclid || null,                 // $28 gclid
-      data.wbraid || null,                // $29 wbraid
-      data.gbraid || null,                // $30 gbraid
-      data.msclkid || null,               // $31 msclkid
-      data.ttclid || null,                // $32 ttclid
-      data.twclid || null,                // $33 twclid
-      data.li_fat_id || null,             // $34 li_fat_id
-      data.epik || null,                  // $35 epik
-      data.pclid || null,                 // $36 pclid
-      data.sc_click_id || null,           // $37 sc_click_id
-      data.rdt_cid || null,               // $38 rdt_cid
-      data.qclid || null,                 // $39 qclid
-      data.yclid || null,                 // $40 yclid
-      channel,                            // $41 channel
-      data.source || data.utm_source || null,     // $42 source_platform
-      data.campaign_id || null,           // $43 campaign_id
-      data.adset_id || data.ad_group_id || null,  // $44 adset_id
-      data.ad_group_id || null,           // $45 ad_group_id
-      data.ad_id || null,                 // $46 ad_id
-      data.campaign_name || null,         // $47 campaign_name
-      data.adset_name || data.ad_group_name || null,  // $48 adset_name
-      data.ad_group_name || null,         // $49 ad_group_name
-      data.ad_name || null,               // $50 ad_name
-      data.placement || null,             // $51 placement
-      data.site_source_name || null,      // $52 site_source_name
-      data.network || null,               // $53 network
-      data.device || uaResult.device.type || null,     // $54 device
-      data.match_type || data.matchtype || null,       // $55 match_type
-      data.keyword || null,               // $56 keyword
-      data.search_query || null,          // $57 search_query
-      data.target_id || data.targetid || null,         // $58 target_id
-      data.creative_id || data.creative || null,       // $59 creative_id
-      data.ad_position || data.adposition || null,     // $60 ad_position
-      data.loc_physical_ms || null,       // $61 loc_physical_ms
-      data.loc_interest_ms || null,       // $62 loc_interest_ms
-      data.gclsrc || null,                // $63 gclsrc
-      JSON.stringify(sourceMeta),         // $64 source_meta
-      ip,                                 // $65 ip
-      data.user_agent || req.headers['user-agent'],    // $66 user_agent
-      uaResult.device.type || null,       // $67 device_type
-      uaResult.os.name || null,           // $68 os
-      uaResult.browser.name || null,      // $69 browser
-      uaResult.browser.version || null,   // $70 browser_version
-      data.language || null,              // $71 language
-      data.timezone || null,              // $72 timezone
-      null,                               // $73 fp_vendor
-      null,                               // $74 device_fingerprint
-      null,                               // $75 fingerprint_confidence
-      JSON.stringify(clientHints),        // $76 client_hints
-      JSON.stringify({}),                 // $77 fp_signals
-      data.cookies_enabled ?? false,      // $78 cookies_enabled
-      data.local_storage_enabled ?? false,// $79 local_storage_enabled
-      null,                               // $80 ad_blocker
-      null,                               // $81 bot_detected
-      null,                               // $82 bot_provider
-      null,                               // $83 bot_score
-      null,                               // $84 ip_asn
-      null,                               // $85 ip_isp
-      null,                               // $86 ip_is_proxy
-      null,                               // $87 ip_is_vpn
-      null,                               // $88 ip_is_tor
-      data.country || null,               // $89 geo_country
-      data.region || null,                // $90 geo_region
-      data.city || null,                  // $91 geo_city
-      data.ga_client_id || null,          // $92 ga_client_id
-      data.ga_session_id ? BigInt(data.ga_session_id) : null,  // $93 ga_session_id
-      data.ga_session_number || null,     // $94 ga_session_number
-      1,                                  // $95 pageviews_count (siempre 1 por fila)
-      1,                                  // $96 events_count
-      false,                              // $97 is_bounce
-      0,                                  // $98 orders_count
-      0.00,                               // $99 revenue_value
-      null,                               // $100 currency
-      null,                               // $101 last_order_id
-      data.email || null,                 // $102 email
-      null,                               // $103 email_sha256
-      data.phone || null,                 // $104 phone
-      null,                               // $105 phone_e164
-      null,                               // $106 phone_sha256
-      JSON.stringify({                    // $107 external_ids
+      sessionId,                          // $1 session_id (ahora es el ID único para cada evento)
+      visitorId,                          // $2 visitor_id
+      null,                               // $3 contact_id (se actualiza después)
+      data.event || 'page_view',         // $4 event_name
+      new Date().toISOString(),          // $5 started_at (UTC)
+      null,                               // $6 ended_at
+      new Date().toISOString(),          // $7 last_event_at (UTC)
+      new Date().toISOString(),          // $8 created_at (UTC)
+      0,                                  // $9 duration_seconds
+      data.url || null,                   // $10 landing_url (ahora es la URL actual)
+      urlData.host,                       // $11 landing_host
+      urlData.path,                       // $12 landing_path
+      urlData.query,                      // $13 landing_query
+      urlData.fragment,                   // $14 landing_fragment
+      data.ref || null,                   // $15 referrer_url
+      referrerData.domain || null,        // $16 referrer_domain
+      data.utm_source || null,            // $17 utm_source
+      data.utm_medium || null,            // $18 utm_medium
+      data.utm_campaign || null,          // $19 utm_campaign
+      data.utm_term || null,              // $20 utm_term
+      data.utm_content || null,           // $21 utm_content
+      data.utm_id || null,                // $22 utm_id
+      data.fbclid || null,                // $23 fbclid
+      data.fbc || null,                   // $24 fbc
+      data.fbp || null,                   // $25 fbp
+      data.gclid || null,                 // $26 gclid
+      data.wbraid || null,                // $27 wbraid
+      data.gbraid || null,                // $28 gbraid
+      data.msclkid || null,               // $29 msclkid
+      data.ttclid || null,                // $30 ttclid
+      data.twclid || null,                // $31 twclid
+      data.li_fat_id || null,             // $32 li_fat_id
+      data.epik || null,                  // $33 epik
+      data.pclid || null,                 // $34 pclid
+      data.sc_click_id || null,           // $35 sc_click_id
+      data.rdt_cid || null,               // $36 rdt_cid
+      data.qclid || null,                 // $37 qclid
+      data.yclid || null,                 // $38 yclid
+      channel,                            // $39 channel
+      data.source || data.utm_source || null,     // $40 source_platform
+      data.campaign_id || null,           // $41 campaign_id
+      data.adset_id || data.ad_group_id || null,  // $42 adset_id
+      data.ad_group_id || null,           // $43 ad_group_id
+      data.ad_id || null,                 // $44 ad_id
+      data.campaign_name || null,         // $45 campaign_name
+      data.adset_name || data.ad_group_name || null,  // $46 adset_name
+      data.ad_group_name || null,         // $47 ad_group_name
+      data.ad_name || null,               // $48 ad_name
+      data.placement || null,             // $49 placement
+      data.site_source_name || null,      // $50 site_source_name
+      data.network || null,               // $51 network
+      data.device || uaResult.device.type || null,     // $52 device
+      data.match_type || data.matchtype || null,       // $53 match_type
+      data.keyword || null,               // $54 keyword
+      data.search_query || null,          // $55 search_query
+      data.target_id || data.targetid || null,         // $56 target_id
+      data.creative_id || data.creative || null,       // $57 creative_id
+      data.ad_position || data.adposition || null,     // $58 ad_position
+      data.loc_physical_ms || null,       // $59 loc_physical_ms
+      data.loc_interest_ms || null,       // $60 loc_interest_ms
+      data.gclsrc || null,                // $61 gclsrc
+      JSON.stringify(sourceMeta),         // $62 source_meta
+      ip,                                 // $63 ip
+      data.user_agent || req.headers['user-agent'],    // $64 user_agent
+      uaResult.device.type || null,       // $65 device_type
+      uaResult.os.name || null,           // $66 os
+      uaResult.browser.name || null,      // $67 browser
+      uaResult.browser.version || null,   // $68 browser_version
+      data.language || null,              // $69 language
+      data.timezone || null,              // $70 timezone
+      null,                               // $71 fp_vendor
+      null,                               // $72 device_fingerprint
+      null,                               // $73 fingerprint_confidence
+      JSON.stringify(clientHints),        // $74 client_hints
+      JSON.stringify({}),                 // $75 fp_signals
+      data.cookies_enabled ?? false,      // $76 cookies_enabled
+      data.local_storage_enabled ?? false,// $77 local_storage_enabled
+      null,                               // $78 ad_blocker
+      null,                               // $79 bot_detected
+      null,                               // $80 bot_provider
+      null,                               // $81 bot_score
+      null,                               // $82 ip_asn
+      null,                               // $83 ip_isp
+      null,                               // $84 ip_is_proxy
+      null,                               // $85 ip_is_vpn
+      null,                               // $86 ip_is_tor
+      data.country || null,               // $87 geo_country
+      data.region || null,                // $88 geo_region
+      data.city || null,                  // $89 geo_city
+      data.ga_client_id || null,          // $90 ga_client_id
+      data.ga_session_id ? BigInt(data.ga_session_id) : null,  // $91 ga_session_id
+      1,                                  // $92 pageviews_count (siempre 1 por fila)
+      1,                                  // $93 events_count
+      false,                              // $94 is_bounce
+      0,                                  // $95 orders_count
+      0.00,                               // $96 revenue_value
+      null,                               // $97 currency
+      null,                               // $98 last_order_id
+      data.email || null,                 // $99 email
+      null,                               // $100 email_sha256
+      data.phone || null,                 // $101 phone
+      null,                               // $102 phone_e164
+      null,                               // $103 phone_sha256
+      JSON.stringify({                    // $104 external_ids
         ghl_contact_id: data.ghl_contact_id || null,
         ghl_location_id: data.ghl_location_id || null
       }),
-      null,                               // $108 consent_marketing
-      null,                               // $109 consent_ads
-      null,                               // $110 consent_ts
-      null,                               // $111 consent_string_tcf
-      null,                               // $112 gpc
-      Boolean(data.do_not_track),         // $113 do_not_track
-      JSON.stringify({                    // $114 properties
+      null,                               // $105 consent_marketing
+      null,                               // $106 consent_ads
+      null,                               // $107 consent_ts
+      null,                               // $108 consent_string_tcf
+      null,                               // $109 gpc
+      Boolean(data.do_not_track),         // $110 do_not_track
+      JSON.stringify({                    // $111 properties
         screen: data.screen_width && data.screen_height ?
           `${data.screen_width}x${data.screen_height}` : null,
         viewport: data.viewport_width && data.viewport_height ?

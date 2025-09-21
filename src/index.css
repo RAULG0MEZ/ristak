@@ -43,6 +43,9 @@
   --effect-glassMorphism-background: rgba(255, 255, 255, 0.03);
   --effect-glassMorphism-backdropFilter: blur(10px);
   --effect-glassMorphism-border: 1px solid rgba(100, 100, 100, 0.15);
+
+  /* Zebra striping para las tablas - agnóstico: fila alterna con tono más oscuro */
+  --table-row-even: rgba(255, 255, 255, 0.015);  /* Fila par: apenas más clara en dark mode */
 }
 
 body.light {
@@ -78,6 +81,9 @@ body.light {
   --effect-glassMorphism-background: rgba(255, 255, 255, 0.7);
   --effect-glassMorphism-backdropFilter: blur(12px);
   --effect-glassMorphism-border: 1px solid rgba(229, 231, 235, 0.5);
+
+  /* Zebra striping para las tablas - agnóstico: fila alterna con tono más oscuro */
+  --table-row-even: rgba(0, 0, 0, 0.015);  /* Fila par: apenas más oscura en light mode */
 }
 
 @layer base {
@@ -579,5 +585,10 @@ body.light {
 
   body.light .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background-color: rgba(0, 0, 0, 0.2);
+  }
+
+  /* Zebra striping sutil para tablas - agnóstico: filas pares con fondo alternado */
+  tbody tr:nth-child(even) {
+    background-color: var(--table-row-even);
   }
 }
