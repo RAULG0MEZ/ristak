@@ -347,7 +347,9 @@ class ContactUnificationService {
    * Crear un nuevo contacto cuando no hay duplicados
    */
   async createNewContact(client, data) {
-    const contactId = data.contact_id || await this.generateContactId();
+    // SIEMPRE generar un contact_id con formato cntct_xxxxx
+    // El contact_id de GHL va en ext_crm_id, NO se usa como contact_id
+    const contactId = await this.generateContactId();
     const now = new Date().toISOString();
 
     const insertQuery = `
