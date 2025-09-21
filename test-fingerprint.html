@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Fingerprinting - Cross Device Tracking</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+    .test-section {
+      margin: 25px 0;
+      padding: 20px;
+      background: #f9f9f9;
+      border-radius: 8px;
+      border-left: 4px solid #4CAF50;
+    }
+    .test-section h3 {
+      margin-top: 0;
+      color: #4CAF50;
+    }
+    .fingerprint-result {
+      background: #fff;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 10px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      word-break: break-all;
+      border: 1px solid #ddd;
+    }
+    .fingerprint-label {
+      font-weight: bold;
+      color: #333;
+      display: inline-block;
+      width: 150px;
+    }
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      margin: 10px 10px 10px 0;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    .secondary-btn {
+      background: #2196F3;
+    }
+    .secondary-btn:hover {
+      background: #1976D2;
+    }
+    #console-output {
+      background: #000;
+      color: #0f0;
+      padding: 15px;
+      border-radius: 6px;
+      height: 200px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      margin-top: 20px;
+    }
+    .status {
+      padding: 5px 10px;
+      border-radius: 4px;
+      display: inline-block;
+      font-size: 14px;
+      margin-left: 10px;
+    }
+    .status.success { background: #d4edda; color: #155724; }
+    .status.error { background: #f8d7da; color: #721c24; }
+    .status.warning { background: #fff3cd; color: #856404; }
+    form {
+      margin: 20px 0;
+    }
+    input {
+      padding: 10px;
+      margin: 10px 0;
+      width: 250px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔐 Test de Fingerprinting Cross-Device</h1>
+    <p class="subtitle">Esta página prueba el sistema de tracking y unificación por fingerprints</p>
+
+    <!-- Script de tracking -->
+    <script defer src="http://localhost:3002/api/tracking/snip.js?s=test"></script>
+
+    <div class="test-section">
+      <h3>📊 Estado del Tracking</h3>
+      <p>Visitor ID: <span id="visitor-id" class="fingerprint-result">Cargando...</span></p>
+      <p>Session ID: <span id="session-id" class="fingerprint-result">Cargando...</span></p>
+      <p>Device Signature: <span id="device-sig" class="fingerprint-result">Cargando...</span></p>
+      <span class="status success" id="tracking-status">Tracking Activo</span>
+    </div>
+
+    <div class="test-section">
+      <h3>🎨 Fingerprints Capturados</h3>
+      <div id="fingerprints">
+        <p><span class="fingerprint-label">Canvas FP:</span> <span id="canvas-fp" class="fingerprint-result">Calculando...</span></p>
+        <p><span class="fingerprint-label">WebGL FP:</span> <span id="webgl-fp" class="fingerprint-result">Calculando...</span></p>
+        <p><span class="fingerprint-label">Screen FP:</span> <span id="screen-fp" class="fingerprint-result">Calculando...</span></p>
+        <p><span class="fingerprint-label">Audio FP:</span> <span id="audio-fp" class="fingerprint-result">Calculando...</span></p>
+        <p><span class="fingerprint-label">Fonts FP:</span> <span id="fonts-fp" class="fingerprint-result">Calculando...</span></p>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h3>🧪 Simulación de Conversión</h3>
+      <p>Llena este formulario para simular una conversión y activar la unificación cross-device:</p>
+      <form id="conversion-form">
+        <input type="email" id="email" placeholder="Email" required><br>
+        <input type="tel" id="phone" placeholder="Teléfono"><br>
+        <button type="submit">Simular Conversión</button>
+      </form>
+    </div>
+
+    <div class="test-section">
+      <h3>🔬 Pruebas Cross-Device</h3>
+      <button onclick="testNewSession()">Crear Nueva Sesión</button>
+      <button onclick="clearLocalStorage()" class="secondary-btn">Limpiar LocalStorage</button>
+      <button onclick="simulateDifferentBrowser()" class="secondary-btn">Simular Otro Browser</button>
+      <p style="margin-top: 15px; color: #666;">
+        <strong>Instrucciones:</strong><br>
+        1. Abre esta página en Chrome normal<br>
+        2. Abre la misma página en modo incógnito o Safari<br>
+        3. Llena el formulario en uno de ellos<br>
+        4. Verifica en la consola si se unifican las sesiones
+      </p>
+    </div>
+
+    <div class="test-section">
+      <h3>📜 Console Output</h3>
+      <div id="console-output"></div>
+    </div>
+  </div>
+
+  <script>
+    // Capturar logs del console
+    const consoleOutput = document.getElementById('console-output');
+    const originalLog = console.log;
+    const originalGroup = console.group;
+    const originalGroupEnd = console.groupEnd;
+
+    let groupDepth = 0;
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const indent = '  '.repeat(groupDepth);
+      const message = indent + args.map(arg =>
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+      ).join(' ');
+      consoleOutput.innerHTML += message + '\n';
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    };
+
+    console.group = function(...args) {
+      originalGroup.apply(console, args);
+      console.log('▼ ' + args.join(' '));
+      groupDepth++;
+    };
+
+    console.groupEnd = function() {
+      originalGroupEnd.apply(console);
+      groupDepth = Math.max(0, groupDepth - 1);
+    };
+
+    // Esperar a que cargue el tracking
+    setTimeout(() => {
+      // Obtener visitor ID del localStorage
+      const visitorId = localStorage.getItem('rstk_vid');
+      const sessionId = sessionStorage.getItem('rstk_session');
+
+      document.getElementById('visitor-id').textContent = visitorId || 'No detectado';
+      document.getElementById('session-id').textContent = sessionId || 'No detectado';
+
+      // Calcular fingerprints localmente para mostrar
+      calculateLocalFingerprints();
+    }, 2000);
+
+    function calculateLocalFingerprints() {
+      try {
+        // Canvas fingerprint
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.textBaseline = 'top';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#f60';
+        ctx.fillRect(125,1,62,20);
+        ctx.fillStyle = '#069';
+        ctx.fillText('Ristak🔥👀', 2, 15);
+        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+        ctx.fillText('Ristak🔥👀', 4, 17);
+        const canvasFp = canvas.toDataURL().substring(0, 50) + '...';
+        document.getElementById('canvas-fp').textContent = canvasFp;
+
+        // WebGL fingerprint
+        const glCanvas = document.createElement('canvas');
+        const gl = glCanvas.getContext('webgl') || glCanvas.getContext('experimental-webgl');
+        if (gl) {
+          const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+          const webglFp = debugInfo ?
+            gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) :
+            gl.getParameter(gl.RENDERER);
+          document.getElementById('webgl-fp').textContent = webglFp;
+        }
+
+        // Screen fingerprint
+        const screenFp = `${screen.width}x${screen.height}x${screen.colorDepth}`;
+        document.getElementById('screen-fp').textContent = screenFp;
+
+        // Audio fingerprint (simulado)
+        document.getElementById('audio-fp').textContent = 'AudioContext disponible: ' + (!!window.AudioContext);
+
+        // Fonts fingerprint (simplificado)
+        const fonts = ['Arial', 'Helvetica', 'Times New Roman', 'Courier', 'Verdana', 'Georgia'];
+        document.getElementById('fonts-fp').textContent = fonts.slice(0, 3).join(', ') + '...';
+
+        // Device signature
+        const sig = canvasFp.substring(0, 10) + screenFp;
+        const hash = sig.split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0);
+        document.getElementById('device-sig').textContent = 'dev_' + Math.abs(hash).toString(36);
+
+      } catch (error) {
+        console.error('Error calculando fingerprints:', error);
+      }
+    }
+
+    // Formulario de conversión
+    document.getElementById('conversion-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const email = document.getElementById('email').value;
+      const phone = document.getElementById('phone').value;
+
+      console.log('📧 Simulando conversión con email:', email);
+
+      // Simular envío de datos con email
+      const visitorId = localStorage.getItem('rstk_vid');
+      const url = new URL(window.location.href);
+      url.searchParams.set('email', email);
+      if (phone) url.searchParams.set('phone', phone);
+      url.searchParams.set('rstk_vid', visitorId);
+
+      // Navegar a la URL con parámetros
+      window.location.href = url.toString();
+    });
+
+    function testNewSession() {
+      sessionStorage.clear();
+      location.reload();
+    }
+
+    function clearLocalStorage() {
+      localStorage.clear();
+      sessionStorage.clear();
+      alert('LocalStorage limpio. Recarga la página para simular un nuevo visitante.');
+    }
+
+    function simulateDifferentBrowser() {
+      // Modificar el visitor ID para simular otro browser
+      const newVid = 'v' + Date.now() + '_' + Math.random().toString(36).substring(2,9);
+      localStorage.setItem('rstk_vid', newVid);
+      sessionStorage.clear();
+      alert('Visitor ID cambiado a: ' + newVid + '\nRecarga la página.');
+    }
+
+    // Verificar parámetros en URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('email')) {
+      console.log('✅ Email detectado en URL:', urlParams.get('email'));
+      console.log('🔄 El sistema debería unificar sesiones con fingerprints similares');
+    }
+  </script>
+</body>
+</html>

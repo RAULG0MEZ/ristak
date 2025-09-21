@@ -139,10 +139,126 @@ history.replaceState(null,'',currentUrl.toString());
 console.log("[HT] 📍 URL actual actualizada con rstk_vid");
 }catch(e){}
 }
+// FINGERPRINTING FUNCTIONS - Genera huellas únicas del dispositivo
+var getCanvasFp=function(){try{
+var canvas=document.createElement('canvas');
+var ctx=canvas.getContext('2d');
+ctx.textBaseline='top';
+ctx.font='14px Arial';
+ctx.textAlign='left';
+ctx.fillStyle='#f60';
+ctx.fillRect(125,1,62,20);
+ctx.fillStyle='#069';
+ctx.fillText('Ristak🔥👀',2,15);
+ctx.fillStyle='rgba(102,204,0,0.7)';
+ctx.fillText('Ristak🔥👀',4,17);
+return canvas.toDataURL().substring(0,100);
+}catch(e){return null}};
+var getWebGLFp=function(){try{
+var canvas=document.createElement('canvas');
+var gl=canvas.getContext('webgl')||canvas.getContext('experimental-webgl');
+if(!gl)return null;
+var debugInfo=gl.getExtension('WEBGL_debug_renderer_info');
+if(debugInfo){
+return gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+}
+return gl.getParameter(gl.RENDERER);
+}catch(e){return null}};
+var getAudioFp=function(){try{
+var AudioContext=window.AudioContext||window.webkitAudioContext;
+if(!AudioContext)return null;
+var context=new AudioContext();
+var oscillator=context.createOscillator();
+var analyser=context.createAnalyser();
+var gainNode=context.createGain();
+var scriptProcessor=context.createScriptProcessor(4096,1,1);
+gainNode.gain.value=0;
+oscillator.connect(analyser);
+analyser.connect(scriptProcessor);
+scriptProcessor.connect(gainNode);
+gainNode.connect(context.destination);
+oscillator.start(0);
+var fp='';
+scriptProcessor.onaudioprocess=function(e){
+var output=e.outputBuffer.getChannelData(0);
+for(var i=0;i<100;i++){fp+=Math.abs(output[i]).toString().substr(0,6)}
+oscillator.disconnect();
+analyser.disconnect();
+scriptProcessor.disconnect();
+gainNode.disconnect();
+context.close();
+};
+return fp.substring(0,50);
+}catch(e){return null}};
+var getFontsFp=function(){try{
+var fonts=['monospace','sans-serif','serif'];
+var testString='mmmmmmmmmmlli';
+var baseFonts={};
+var s=document.createElement('span');
+s.style.fontSize='72px';
+s.innerHTML=testString;
+document.body.appendChild(s);
+for(var i=0;i<fonts.length;i++){
+s.style.fontFamily=fonts[i];
+baseFonts[fonts[i]]={width:s.offsetWidth,height:s.offsetHeight};
+}
+var detect=[];
+var testFonts=['Andale Mono','Arial','Arial Black','Arial Hebrew','Arial MT','Arial Narrow','Arial Rounded MT Bold','Arial Unicode MS','Bitstream Vera Sans Mono','Book Antiqua','Bookman Old Style','Calibri','Cambria','Century','Century Gothic','Century Schoolbook','Comic Sans','Comic Sans MS','Consolas','Courier','Courier New','Georgia','Helvetica','Helvetica Neue','Impact','Lucida Bright','Lucida Calligraphy','Lucida Console','Lucida Fax','LUCIDA GRANDE','Lucida Handwriting','Lucida Sans','Lucida Sans Typewriter','Lucida Sans Unicode','Microsoft Sans Serif','Monaco','Monotype Corsiva','MS Gothic','MS Outlook','MS PGothic','MS Reference Sans Serif','MS Sans Serif','MS Serif','MYRIAD','MYRIAD PRO','Palatino','Palatino Linotype','Segoe Print','Segoe Script','Segoe UI','Segoe UI Light','Segoe UI Semibold','Segoe UI Symbol','Tahoma','Times','Times New Roman','Times New Roman PS','Trebuchet MS','Verdana','Wingdings','Wingdings 2','Wingdings 3'];
+for(var j=0;j<testFonts.length;j++){
+var matched=false;
+for(var k=0;k<fonts.length;k++){
+s.style.fontFamily=testFonts[j]+','+fonts[k];
+var metrics={width:s.offsetWidth,height:s.offsetHeight};
+if(metrics.width!==baseFonts[fonts[k]].width||metrics.height!==baseFonts[fonts[k]].height){
+matched=true;break;
+}
+}
+if(matched){detect.push(testFonts[j])}
+}
+document.body.removeChild(s);
+return detect.slice(0,10).join(',');
+}catch(e){return null}};
+// Generar device signature combinando todos los fingerprints
+var genDeviceSig=function(fps){
+var sig=[fps.canvas,fps.webgl,fps.screen,fps.audio,fps.fonts].filter(Boolean).join('|');
+if(!sig)return null;
+// Simple hash function para crear signature más corta
+var hash=0;
+for(var i=0;i<sig.length;i++){
+var char=sig.charCodeAt(i);
+hash=((hash<<5)-hash)+char;
+hash=hash&hash;
+}
+return 'dev_'+Math.abs(hash).toString(36);
+};
+// Capturar fingerprints
+var fps={
+canvas:getCanvasFp(),
+webgl:getWebGLFp(),
+screen:screen.width+'x'+screen.height+'x'+screen.colorDepth,
+audio:getAudioFp(),
+fonts:getFontsFp()
+};
+var deviceSig=genDeviceSig(fps);
+console.group('[HT] 🔐 Device Fingerprints');
+console.log('🎨 Canvas:',fps.canvas?fps.canvas.substring(0,30)+'...':'null');
+console.log('🎮 WebGL:',fps.webgl||'null');
+console.log('📺 Screen:',fps.screen);
+console.log('🔊 Audio:',fps.audio?'captured':'null');
+console.log('📝 Fonts:',fps.fonts?fps.fonts.split(',').length+' fonts detected':'null');
+console.log('🔑 Device Signature:',deviceSig||'null');
+console.groupEnd();
 var f=function(n){
 var o={
 // Identificadores principales
 sid:e,vid:u,sess:g,session_num:m,
+// FINGERPRINTS AGREGADOS
+canvas_fp:fps.canvas,
+webgl_fp:fps.webgl,
+screen_fp:fps.screen,
+audio_fp:fps.audio,
+fonts_fp:fps.fonts,
+device_sig:deviceSig,
 // Información de la página
 url:location.href,
 title:document.title,
@@ -514,14 +630,23 @@ router.post('/collect', async (req, res) => {
         consent_string_tcf,
         gpc,
         do_not_track,
-        properties
+        properties,
+        -- NUEVAS COLUMNAS DE FINGERPRINTING
+        canvas_fingerprint,
+        webgl_fingerprint,
+        screen_fingerprint,
+        audio_fingerprint,
+        fonts_fingerprint,
+        device_signature,
+        fingerprint_probability
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
         $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
         $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60,
         $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97,
-        $98, $99, $100, $101, $102, $103, $104, $105, $106, $107, $108, $109, $110, $111
+        $98, $99, $100, $101, $102, $103, $104, $105, $106, $107, $108, $109, $110, $111,
+        $112, $113, $114, $115, $116, $117, $118
       )
     `;
 
@@ -650,7 +775,15 @@ router.post('/collect', async (req, res) => {
         first_name: data.first_name || null,
         last_name: data.last_name || null,
         full_name: data.full_name || null
-      })  // $114 (último parámetro)
+      }),
+      // NUEVOS PARÁMETROS DE FINGERPRINTING
+      data.canvas_fp || null,             // $112 canvas_fingerprint
+      data.webgl_fp || null,              // $113 webgl_fingerprint
+      data.screen_fp || null,             // $114 screen_fingerprint
+      data.audio_fp || null,              // $115 audio_fingerprint
+      data.fonts_fp || null,              // $116 fonts_fingerprint
+      data.device_sig || null,            // $117 device_signature
+      null                                 // $118 fingerprint_probability (se calcula después)
     ]);
 
     // =============================================================================
@@ -660,6 +793,7 @@ router.post('/collect', async (req, res) => {
     if (data.ghl_contact_id || data.email || data.phone) {
       try {
         const contactUnificationService = require('../services/contact-unification.service');
+        const fingerprintUnificationService = require('../services/fingerprint-unification.service');
 
         // Preparar datos para unificación inteligente
         const contactData = {
@@ -709,6 +843,32 @@ router.post('/collect', async (req, res) => {
           );
 
           console.log(`[Tracking → Contact] ${updateResult.rowCount} pageviews de sesión ${sessionId} vinculados a contacto ${unifiedContact.contact_id}`);
+
+          // NUEVO: Unificación probabilística por fingerprints
+          // Buscar y vincular sesiones con fingerprints similares
+          const currentSessionData = {
+            visitor_id: visitorId,
+            canvas_fingerprint: data.canvas_fp,
+            webgl_fingerprint: data.webgl_fp,
+            screen_fingerprint: data.screen_fp,
+            audio_fingerprint: data.audio_fp,
+            fonts_fingerprint: data.fonts_fp,
+            device_signature: data.device_sig,
+            ip: ip,
+            timezone: data.timezone,
+            user_agent: data.user_agent
+          };
+
+          const unificationResult = await fingerprintUnificationService.unifySessionsOnConversion(
+            unifiedContact.contact_id,
+            currentSessionData
+          );
+
+          if (unificationResult.unified > 0) {
+            console.log(`[Fingerprint Unification] ✅ ${unificationResult.unified} sesiones unificadas por fingerprint`);
+            console.log(`[Fingerprint Unification] Visitor IDs unificados: ${unificationResult.visitorIds.join(', ')}`);
+            console.log(`[Fingerprint Unification] Probabilidad: ${unificationResult.probability}%`);
+          }
         }
 
       } catch (matchingError) {

@@ -493,20 +493,27 @@ export function Reports() {
 
   // Formatear fecha según el tipo de vista
   const formatDateByView = (date: string) => {
+    // Para vista por día, formatear como día específico
+    if (viewType === 'day') {
+      // Si la fecha viene en formato YYYY-MM-DD, mostrar día específico
+      const d = new Date(date + 'T12:00:00')  // Agregar hora para evitar problemas de timezone
+      return formatDateShort(d)  // Esto mostrará "15 sep 2024"
+    }
+
     if (viewType === 'month' && date.match(/^\d{4}-\d{2}$/)) {
       const [year, month] = date.split('-').map(Number)
       const monthName = months[month - 1]
       return `${monthName} ${year}`
     }
-    
+
     const d = new Date(date)
-    
+
     if (viewType === 'year') {
       return formatYear(d)
     } else if (viewType === 'month') {
       return formatMonthYear(d)
     } else {
-      return formatDateLong(d)
+      return formatDateShort(d)  // Por defecto usar formato corto
     }
   }
 
