@@ -847,9 +847,8 @@ router.post('/collect', async (req, res) => {
           // Estos vienen de la URL con parámetros de campaña
           rstk_adid: data.ad_id || data.fbclid || data.gclid ||
                      data.campaign_id || null,
-          rstk_source: data.utm_source || data.utm_campaign ||
-                       data.site_source_name || data.ghl_source ||
-                       channel || 'Tracking',
+          // rstk_source debe ser específicamente el utm_source (fb_ad, google_ads, etc)
+          rstk_source: data.utm_source || data.site_source_name || null,
 
           // Metadata
           source: data.ghl_source || data.utm_source || channel || 'Tracking',
