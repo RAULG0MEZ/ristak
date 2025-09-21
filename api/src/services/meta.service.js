@@ -166,7 +166,7 @@ class MetaService {
     // Update token and user info, but preserve existing configuration
     await this.upsertConfig({
       access_token: encrypt(data2.access_token),
-      token_expires_at: expiresAt ? expiresAt.toISOString() : null,
+      token_expires_at: expiresAt, // Ya es un string ISO o null, no llamar toISOString() otra vez
       meta_user_id: me.id,
       meta_user_name: me.name,
       ...preserveFields // Spread preserved fields to maintain existing configuration
@@ -218,7 +218,7 @@ class MetaService {
       clearInterval(this.intervalHandle)
       this.intervalHandle = null
     }
-    
+
     // Clear sync state
     this.syncState = {
       running: false,
@@ -227,7 +227,42 @@ class MetaService {
       total: null,
       message: null,
     }
-    
+
+    // Intentar revocar permisos en Meta antes de borrar la config local
+    const cfg = await this.getConfig()
+    if (cfg?.access_token) {
+      try {
+        console.log('[META] Revocando permisos de la app en Facebook...')
+
+        // Método 1: Eliminar permisos de la app para el usuario
+        // Esto hace que la próxima vez Meta vuelva a pedir TODOS los permisos desde cero
+        const revokeUrl = `${GRAPH_BASE}/me/permissions?access_token=${encodeURIComponent(cfg.access_token)}`
+        const revokeRes = await fetch(revokeUrl, { method: 'DELETE' })
+
+        if (revokeRes.ok) {
+          const result = await revokeRes.json()
+          console.log('[META] Permisos revocados exitosamente en Facebook:', result)
+        } else {
+          // Si falla, intentar método alternativo
+          const errorText = await revokeRes.text()
+          console.error('[META] Error revocando permisos (intentando alternativa):', errorText)
+
+          // Método 2: Desautorizar la app completamente
+          const deauthUrl = `${GRAPH_BASE}/${cfg.meta_user_id}/permissions?access_token=${encodeURIComponent(cfg.access_token)}`
+          const deauthRes = await fetch(deauthUrl, { method: 'DELETE' })
+
+          if (deauthRes.ok) {
+            console.log('[META] App desautorizada usando método alternativo')
+          } else {
+            console.error('[META] No se pudieron revocar permisos en Meta (continuando con desconexión local)')
+          }
+        }
+      } catch (revokeErr) {
+        // No fallar la desconexión si no se pueden revocar permisos
+        console.error('[META] Error revocando permisos:', revokeErr)
+      }
+    }
+
     // Delete all meta data from meta schema
     await databasePool.query('BEGIN')
     try {
@@ -236,7 +271,7 @@ class MetaService {
       // Delete config
       await databasePool.query('DELETE FROM meta.meta_config WHERE id = 1')
       await databasePool.query('COMMIT')
-      return { success: true, message: 'Meta account disconnected successfully' }
+      return { success: true, message: 'Meta account disconnected and permissions revoked' }
     } catch (err) {
       await databasePool.query('ROLLBACK')
       throw new Error(`Failed to disconnect: ${err.message}`)

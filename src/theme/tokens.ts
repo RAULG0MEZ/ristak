@@ -9,10 +9,10 @@ export const themes = {
         glassBorder: 'rgba(0, 0, 0, 0.06)',
       },
       text: {
-        primary: '#111827',
-        secondary: '#4b5563',
-        tertiary: '#9ca3af',
-        muted: '#d1d5db',
+        primary: '#000000',    // Negro puro sin suavizar
+        secondary: '#374151',   // Gris más sólido (gray-700)
+        tertiary: '#6b7280',    // Gris medio (gray-500)
+        muted: '#9ca3af',       // Gris suave (gray-400)
         onAccent: '#ffffff',
       },
       accent: {
@@ -21,7 +21,7 @@ export const themes = {
         pink: '#ec4899',
         green: '#10b981',
         orange: '#f97316',
-        red: '#ef4444',
+        red: '#dc2626',  // Rojo más sólido y vibrante
       },
       chart: {
         income: '#3b82f6',
@@ -45,7 +45,7 @@ export const themes = {
       status: {
         success: '#10b981',
         warning: '#f59e0b',
-        error: '#ef4444',
+        error: '#dc2626',  // Rojo más sólido
         info: '#3b82f6',
       },
       gradients: {
@@ -90,10 +90,10 @@ export const themes = {
         glassBorder: 'rgba(255, 255, 255, 0.08)',
       },
       text: {
-        primary: '#ffffff',
-        secondary: '#9ca3af',
-        tertiary: '#6b7280',
-        muted: '#4b5563',
+        primary: '#ffffff',    // Blanco puro sin suavizar
+        secondary: '#e5e7eb',  // Gris más sólido (gray-200)
+        tertiary: '#9ca3af',   // Se mantiene (gray-400)
+        muted: '#6b7280',      // Se mantiene (gray-500)
         onAccent: '#ffffff',
       },
       accent: {
@@ -102,13 +102,13 @@ export const themes = {
         pink: '#ec4899',
         green: '#10b981',
         orange: '#f97316',
-        red: '#ef4444',
+        red: '#dc2626',  // Rojo más sólido y vibrante (red-600)
       },
       chart: {
         income: '#3b82f6',
         outcome: '#f97316',
         // Estilo estándar para métricas lineales (gris en light, claro en dark)
-        metricLine: '#ffffff', // blanco en dark
+        metricLine: '#f3f4f6', // Más visible pero suave
         grid: 'rgba(255, 255, 255, 0.08)', // sutil en dark
         gradients: {
           income: {
@@ -126,7 +126,7 @@ export const themes = {
       status: {
         success: '#10b981',
         warning: '#f59e0b',
-        error: '#ef4444',
+        error: '#dc2626',  // Rojo más sólido para errores
         info: '#3b82f6',
       },
       gradients: {

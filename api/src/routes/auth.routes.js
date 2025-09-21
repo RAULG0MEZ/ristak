@@ -87,6 +87,7 @@ router.post('/login', async (req, res) => {
       token,
       userId: user.id,
       name: user.name || email.split('@')[0],
+      accountName: user.name || email.split('@')[0], // Agregar accountName para compatibilidad con el frontend
       email,
       role: user.role
     });
@@ -102,7 +103,7 @@ router.post('/login', async (req, res) => {
 });
 
 // GET /api/auth/verify
-router.get('/verify', (req, res) => {
+router.get('/verify', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -115,11 +116,22 @@ router.get('/verify', (req, res) => {
     const token = authHeader.substring(7);
     try {
       const payload = jwt.verify(token, getAuthSecret());
+
+      // Buscar el nombre actual del usuario en la DB
+      const userQuery = 'SELECT name, email FROM users WHERE id = $1 LIMIT 1';
+      const userResult = await databasePool.query(userQuery, [payload.userId]);
+
+      let accountName = payload.email.split('@')[0]; // Default
+      if (userResult.rows.length > 0 && userResult.rows[0].name) {
+        accountName = userResult.rows[0].name;
+      }
+
       res.json({
         success: true,
         userId: payload.userId,
         email: payload.email,
-        role: payload.role
+        role: payload.role,
+        accountName: accountName // Agregar nombre del usuario
       });
     } catch (error) {
       if (error.name === 'TokenExpiredError') {

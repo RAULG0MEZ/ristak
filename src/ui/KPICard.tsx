@@ -23,7 +23,7 @@ export function KPICard({
   iconColor = 'text-accent-blue',
   className,
 }: KPICardProps) {
-  const trendColor = trend === 'up' ? 'text-success' : trend === 'down' ? 'text-error' : 'text-tertiary'
+  const trendColor = trend === 'up' ? 'text-success' : trend === 'down' ? 'text-red-500 dark:text-red-400' : 'text-tertiary'
 
   return (
     <Card variant="glass" className={cn('p-4 overflow-hidden', className)}>

@@ -130,7 +130,7 @@ async function getCampaignContactDetails(req, res) {
     const campaignId = req.query.campaignId ? String(req.query.campaignId).trim() : null
 
     // Llamar al servicio para obtener los contactos con atribución válida de Meta
-    // Usando getContactsByHierarchy que valida attribution_ad_id y fechas de campaña
+    // Usando getContactsByHierarchy que valida rstk_adid y fechas de campaña
     const contacts = await campaignsService.getContactsByHierarchy({
       adIds: normalizedAdIds,
       adSetIds: adSetId ? [adSetId] : [],

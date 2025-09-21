@@ -5,25 +5,32 @@ import { Icons } from '../../icons'
 import { useDateRange } from '../../contexts/DateContext'
 import { useTrafficData } from '../../hooks/useTrafficData'
 import { useTheme } from '../../contexts/ThemeContext'
+// Íconos de redes sociales oficiales
+import {
+  FaFacebook, FaInstagram, FaGoogle, FaTiktok,
+  FaLinkedin, FaXTwitter, FaPinterest, FaSnapchat,
+  FaReddit, FaWhatsapp
+} from 'react-icons/fa6'
+import { HiMail, HiSearch, HiLink, HiExternalLink, HiQuestionMarkCircle } from 'react-icons/hi'
 
-// Mapeo mejorado de iconos y colores para cada plataforma
+// Mapeo con íconos oficiales y colores de marca 2024
 const sourceConfig: Record<string, { icon: any; brandColor: string }> = {
-  'Facebook Ads': { icon: Icons.facebook, brandColor: '#1877F2' },
-  'Facebook': { icon: Icons.facebook, brandColor: '#1877F2' },
-  'Instagram': { icon: Icons.image, brandColor: '#E4405F' },
-  'Google': { icon: Icons.google, brandColor: '#4285F4' },
-  'Google Ads': { icon: Icons.google, brandColor: '#4285F4' },
-  'Directo': { icon: Icons.users, brandColor: '#6B7280' },
-  'Orgánico': { icon: Icons.search, brandColor: '#10B981' },
-  'Referidos': { icon: Icons.userPlus, brandColor: '#F59E0B' },
-  'TikTok': { icon: Icons.play, brandColor: '#000000' },
-  'Email': { icon: Icons.send, brandColor: '#10B981' },
-  'YouTube': { icon: Icons.play, brandColor: '#FF0000' },
-  'LinkedIn': { icon: Icons.building, brandColor: '#0A66C2' },
-  'Twitter': { icon: Icons.megaphone, brandColor: '#1DA1F2' },
-  'WhatsApp': { icon: Icons.phone, brandColor: '#25D366' },
-  'Otros': { icon: Icons.globe, brandColor: '#9CA3AF' },
-  'Other': { icon: Icons.globe, brandColor: '#9CA3AF' }
+  'Facebook Ads': { icon: FaFacebook, brandColor: '#1877f2' },
+  'Instagram Ads': { icon: FaInstagram, brandColor: '#c32aa3' },
+  'Google Ads': { icon: FaGoogle, brandColor: '#4285f4' },
+  'TikTok Ads': { icon: FaTiktok, brandColor: '#ee1d52' },
+  'LinkedIn Ads': { icon: FaLinkedin, brandColor: '#0a66c2' },
+  'Twitter/X Ads': { icon: FaXTwitter, brandColor: '#000000' },
+  'Pinterest Ads': { icon: FaPinterest, brandColor: '#bd081c' },
+  'Snapchat Ads': { icon: FaSnapchat, brandColor: '#fffc00' },
+  'Reddit Ads': { icon: FaReddit, brandColor: '#ff4301' },
+  'WhatsApp': { icon: FaWhatsapp, brandColor: '#25d366' },
+  'Email': { icon: HiMail, brandColor: '#ea4335' },
+  'Orgánico': { icon: HiSearch, brandColor: '#34a853' },
+  'Directo': { icon: HiLink, brandColor: '#5865f2' },
+  'Referidos': { icon: HiExternalLink, brandColor: '#fbbc05' },
+  'Otros': { icon: HiQuestionMarkCircle, brandColor: '#6b7280' },
+  'Other': { icon: HiQuestionMarkCircle, brandColor: '#6b7280' }
 }
 
 export function TrafficChart() {

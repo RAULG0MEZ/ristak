@@ -3,6 +3,7 @@ import { Modal } from '../../ui/Modal'
 import { Button } from '../../ui/Button'
 import { Card } from '../../ui/Card'
 import { Select } from '../../ui/Select'
+import { Input } from '../../ui/Input'
 import { Icons } from '../../icons'
 import { 
   parseCSVContent, 
@@ -32,6 +33,8 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
   const [isProcessing, setIsProcessing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [selectedTimezone, setSelectedTimezone] = useState<string>('America/Mexico_City')
+  const [manualRstkSource, setManualRstkSource] = useState<string>('')
+  const [useManualRstkSource, setUseManualRstkSource] = useState(false)
   const [importResult, setImportResult] = useState<{
     success: boolean
     processed: number
@@ -39,7 +42,7 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
     errors: string[]
     message: string
   } | null>(null)
-  
+
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const importTypeOptions = [
@@ -122,9 +125,19 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
 
     try {
       // Procesar todos los rows con el timezone seleccionado
-      const processedData = csvData.rows.map(row =>
-        processCSVRow(row, csvData.headers, mapping, importType, selectedTimezone)
-      )
+      const processedData = csvData.rows.map(row => {
+        const processedRow = processCSVRow(row, csvData.headers, mapping, importType, selectedTimezone)
+
+        // Si es importación de contactos y se configuró rstkSource manual
+        if (importType === 'contacts' && useManualRstkSource && manualRstkSource) {
+          // Solo aplicar si el contacto tiene attributionId pero NO tiene rstkSource
+          if (processedRow.attributionId && !processedRow.rstkSource) {
+            processedRow.rstkSource = manualRstkSource
+          }
+        }
+
+        return processedRow
+      })
 
       // Para archivos grandes (>100 registros), usar importación asíncrona
       const isLargeFile = processedData.length > 100
@@ -140,7 +153,8 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
           body: JSON.stringify({
             data: processedData,
             type: importType,
-            timezone: selectedTimezone
+            timezone: selectedTimezone,
+            manualRstkSource: useManualRstkSource ? manualRstkSource : null
           })
         })
 
@@ -174,7 +188,8 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
           data: processedData,
           mapping: mapping,
           importType: importType,
-          timezone: selectedTimezone
+          timezone: selectedTimezone,
+          manualRstkSource: useManualRstkSource ? manualRstkSource : null
         }
 
         const response = await fetchWithAuth(url, {
@@ -224,6 +239,8 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
     setIsProcessing(false)
     setErrorMessage(null)
     setImportResult(null)
+    setManualRstkSource('')
+    setUseManualRstkSource(false)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -403,6 +420,57 @@ export function CSVImportModal({ isOpen, onClose, importType, onSuccess }: CSVIm
                 )
               })}
             </div>
+
+            {/* Opción manual para rstkSource solo en contactos */}
+            {importType === 'contacts' && (
+              <Card variant="info" className="glass">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Icons.hash className="w-5 h-5 text-accent-blue" />
+                    <h4 className="text-base font-semibold text-primary">
+                      Fuente de Atribución (Opcional)
+                    </h4>
+                  </div>
+                  <p className="text-sm text-secondary">
+                    Si tus contactos tienen un ID de Atribución (ad_id) pero no tienen la fuente (rstk_source),
+                    puedes configurar una fuente manual que se aplicará a TODOS los contactos con ad_id.
+                  </p>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="useManualSource"
+                      checked={useManualRstkSource}
+                      onChange={(e) => {
+                        setUseManualRstkSource(e.target.checked)
+                        if (!e.target.checked) setManualRstkSource('')
+                      }}
+                      className="w-4 h-4 accent-accent-blue"
+                    />
+                    <label htmlFor="useManualSource" className="text-sm text-primary cursor-pointer">
+                      Usar fuente manual para todos los contactos con ad_id
+                    </label>
+                  </div>
+
+                  {useManualRstkSource && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-primary">
+                        Fuente de atribución (rstk_source)
+                      </label>
+                      <Input
+                        value={manualRstkSource}
+                        onChange={(e) => setManualRstkSource(e.target.value)}
+                        placeholder="Ej: fb_ad, instagram_ad, facebook_paid, etc."
+                        className="w-full"
+                      />
+                      <div className="text-xs text-tertiary bg-glass-subtle p-2 rounded">
+                        💡 Valores comunes: fb_ad, fb_ads, facebook_ad, facebook_paid, instagram_ad, ig_ad, meta_ad
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            )}
 
             <div className="flex justify-between items-center">
               <Button 

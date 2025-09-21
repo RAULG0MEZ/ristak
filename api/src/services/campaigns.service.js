@@ -94,7 +94,13 @@ class CampaignsService {
           SELECT
             c.contact_id
           FROM contacts c
-          WHERE c.attribution_ad_id IS NOT NULL
+          WHERE c.rstk_adid IS NOT NULL
+            AND c.rstk_source IS NOT NULL
+            AND LOWER(c.rstk_source) IN (
+              'fb_ad', 'fb_ads', 'facebook_ad', 'facebook_ads', 'facebook_paid',
+              'fb_paid', 'facebook', 'fb', 'meta_ad', 'meta_ads', 'meta_paid',
+              'instagram_ad', 'instagram_ads', 'ig_ad', 'ig_ads', 'ig_paid'
+            )
             AND c.created_at >= $1 AND c.created_at <= $2
             AND NOT EXISTS (
               SELECT 1 FROM session_attribution sa
@@ -102,7 +108,7 @@ class CampaignsService {
             )
             AND EXISTS (
               SELECT 1 FROM meta.meta_ads ma
-              WHERE ma.ad_id = c.attribution_ad_id
+              WHERE ma.ad_id = c.rstk_adid
                 AND (
                   ma.date::date = c.created_at::date
                   OR (
@@ -153,7 +159,13 @@ class CampaignsService {
           SELECT
             c.contact_id
           FROM contacts c
-          WHERE c.attribution_ad_id IS NOT NULL
+          WHERE c.rstk_adid IS NOT NULL
+            AND c.rstk_source IS NOT NULL
+            AND LOWER(c.rstk_source) IN (
+              'fb_ad', 'fb_ads', 'facebook_ad', 'facebook_ads', 'facebook_paid',
+              'fb_paid', 'facebook', 'fb', 'meta_ad', 'meta_ads', 'meta_paid',
+              'instagram_ad', 'instagram_ads', 'ig_ad', 'ig_ads', 'ig_paid'
+            )
             AND c.created_at >= $1 AND c.created_at <= $2
             AND EXISTS (
               SELECT 1 FROM payments p
@@ -166,7 +178,7 @@ class CampaignsService {
             )
             AND EXISTS (
               SELECT 1 FROM meta.meta_ads ma
-              WHERE ma.ad_id = c.attribution_ad_id
+              WHERE ma.ad_id = c.rstk_adid
                 AND (
                   ma.date::date = c.created_at::date
                   OR (
@@ -352,9 +364,15 @@ class CampaignsService {
            -- Fallback: usar attribution_ad_id para contactos sin sesiones o visitor_id
            SELECT
              c.contact_id,
-             c.attribution_ad_id AS ad_id
+             c.rstk_adid AS ad_id
            FROM contacts c
-           WHERE c.attribution_ad_id IS NOT NULL
+           WHERE c.rstk_adid IS NOT NULL
+            AND c.rstk_source IS NOT NULL
+            AND LOWER(c.rstk_source) IN (
+              'fb_ad', 'fb_ads', 'facebook_ad', 'facebook_ads', 'facebook_paid',
+              'fb_paid', 'facebook', 'fb', 'meta_ad', 'meta_ads', 'meta_paid',
+              'instagram_ad', 'instagram_ads', 'ig_ad', 'ig_ads', 'ig_paid'
+            )
              AND c.created_at >= $1
              AND c.created_at <= $2
              AND NOT EXISTS (
@@ -408,10 +426,16 @@ class CampaignsService {
            -- Fallback: usar attribution_ad_id para contactos sin sesiones o visitor_id
            SELECT
              c.contact_id,
-             c.attribution_ad_id AS ad_id
+             c.rstk_adid AS ad_id
            FROM appointments a
            INNER JOIN contacts c ON a.contact_id = c.contact_id
-           WHERE c.attribution_ad_id IS NOT NULL
+           WHERE c.rstk_adid IS NOT NULL
+            AND c.rstk_source IS NOT NULL
+            AND LOWER(c.rstk_source) IN (
+              'fb_ad', 'fb_ads', 'facebook_ad', 'facebook_ads', 'facebook_paid',
+              'fb_paid', 'facebook', 'fb', 'meta_ad', 'meta_ads', 'meta_paid',
+              'instagram_ad', 'instagram_ads', 'ig_ad', 'ig_ads', 'ig_paid'
+            )
              AND c.created_at >= $1
              AND c.created_at <= $2
              AND NOT EXISTS (
@@ -469,9 +493,15 @@ class CampaignsService {
            -- Fallback: usar attribution_ad_id para contactos sin sesiones o visitor_id
            SELECT
              c.contact_id,
-             c.attribution_ad_id AS ad_id
+             c.rstk_adid AS ad_id
            FROM contacts c
-           WHERE c.attribution_ad_id IS NOT NULL
+           WHERE c.rstk_adid IS NOT NULL
+            AND c.rstk_source IS NOT NULL
+            AND LOWER(c.rstk_source) IN (
+              'fb_ad', 'fb_ads', 'facebook_ad', 'facebook_ads', 'facebook_paid',
+              'fb_paid', 'facebook', 'fb', 'meta_ad', 'meta_ads', 'meta_paid',
+              'instagram_ad', 'instagram_ads', 'ig_ad', 'ig_ads', 'ig_paid'
+            )
              AND c.created_at >= $1
              AND c.created_at <= $2
              AND EXISTS (
@@ -639,12 +669,18 @@ class CampaignsService {
                COALESCE(SUM(p.amount), 0) AS total_revenue
          FROM contacts c
          LEFT JOIN payments p ON p.contact_id = c.contact_id AND p.status = 'completed'
-         WHERE c.attribution_ad_id IS NOT NULL
+         WHERE c.rstk_adid IS NOT NULL
+            AND c.rstk_source IS NOT NULL
+            AND LOWER(c.rstk_source) IN (
+              'fb_ad', 'fb_ads', 'facebook_ad', 'facebook_ads', 'facebook_paid',
+              'fb_paid', 'facebook', 'fb', 'meta_ad', 'meta_ads', 'meta_paid',
+              'instagram_ad', 'instagram_ads', 'ig_ad', 'ig_ads', 'ig_paid'
+            )
            AND c.created_at >= $1
            AND c.created_at <= $2
            AND EXISTS (
              SELECT 1 FROM meta.meta_ads ma
-             WHERE ma.ad_id = c.attribution_ad_id
+             WHERE ma.ad_id = c.rstk_adid
                AND ma.date::date >= (c.created_at::date - INTERVAL '3 days')
                AND ma.date::date <= c.created_at::date
            )
@@ -814,8 +850,14 @@ class CampaignsService {
         WITH scoped AS (
           SELECT DISTINCT c.contact_id
           FROM contacts c
-          JOIN meta.meta_ads ma ON ma.ad_id = c.attribution_ad_id
-          WHERE c.attribution_ad_id IS NOT NULL
+          JOIN meta.meta_ads ma ON ma.ad_id = c.rstk_adid
+          WHERE c.rstk_adid IS NOT NULL
+            AND c.rstk_source IS NOT NULL
+            AND LOWER(c.rstk_source) IN (
+              'fb_ad', 'fb_ads', 'facebook_ad', 'facebook_ads', 'facebook_paid',
+              'fb_paid', 'facebook', 'fb', 'meta_ad', 'meta_ads', 'meta_paid',
+              'instagram_ad', 'instagram_ads', 'ig_ad', 'ig_ads', 'ig_paid'
+            )
             -- Filtrar por fecha de creación del contacto
             AND c.created_at >= $${paramIndex}
             AND c.created_at <= $${paramIndex + 1}
@@ -825,7 +867,7 @@ class CampaignsService {
             -- Validar que había una campaña activa cuando se creó el contacto
             AND EXISTS (
               SELECT 1 FROM meta.meta_ads ma2
-              WHERE ma2.ad_id = c.attribution_ad_id
+              WHERE ma2.ad_id = c.rstk_adid
               AND ma2.date::date BETWEEN (c.created_at::date - INTERVAL '3 days') AND c.created_at::date
             )
             ${typeFilterForScope}
@@ -837,7 +879,7 @@ class CampaignsService {
           c.email,
           c.phone,
           c.company,
-          c.attribution_ad_id,
+          c.rstk_adid,
           c.ext_crm_id,
           c.status,
           c.source,
@@ -889,7 +931,7 @@ class CampaignsService {
           email: row.email,
           phone: row.phone,
           company: row.company,
-          attributionAdId: row.attribution_ad_id,
+          attributionAdId: row.rstk_adid,
           ghlId: row.ext_crm_id,
           status: isClient ? 'client' : appointmentCount > 0 ? 'appointment' : 'lead',
           source: row.source || 'Direct',
@@ -927,7 +969,13 @@ class CampaignsService {
             COALESCE(SUM(p.amount), 0) as revenue
           FROM contacts c
           JOIN payments p ON p.contact_id = c.contact_id
-          WHERE c.attribution_ad_id IS NOT NULL
+          WHERE c.rstk_adid IS NOT NULL
+            AND c.rstk_source IS NOT NULL
+            AND LOWER(c.rstk_source) IN (
+              'fb_ad', 'fb_ads', 'facebook_ad', 'facebook_ads', 'facebook_paid',
+              'fb_paid', 'facebook', 'fb', 'meta_ad', 'meta_ads', 'meta_paid',
+              'instagram_ad', 'instagram_ads', 'ig_ad', 'ig_ads', 'ig_paid'
+            )
             AND p.status = 'completed'
             AND c.created_at >= $1::date
             AND c.created_at <= $2::date

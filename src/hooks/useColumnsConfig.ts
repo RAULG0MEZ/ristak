@@ -82,7 +82,8 @@ export function useColumnsConfig(storageKey: string, columns: Column[]) {
   }, [storageKey])
 
   // Aplicar configuración guardada a las columnas frescas del padre
-  const configuredColumns = useCallback((): Column[] => {
+  // IMPORTANTE: Siempre usar las columnas frescas con sus funciones render actualizadas
+  const configuredColumns = (): Column[] => {
     if (savedConfig.length === 0) {
       return columns
     }
@@ -110,7 +111,7 @@ export function useColumnsConfig(storageKey: string, columns: Column[]) {
     })
 
     return result
-  }, [columns, savedConfig])
+  }
 
   // Manejar reordenamiento
   const handleColumnReorder = useCallback((newColumns: Column[]) => {

@@ -2,11 +2,11 @@
 
 ## Resumen Ejecutivo
 
-**El problema:** Muchos contactos no tienen attribution_ad_id, perdiendo 30% de la atribución de campañas.
+**El problema:** Muchos contactos no tienen rstk_adid, perdiendo 30% de la atribución de campañas.
 
-**La solución:** Sistema dual que usa tracking.sessions como principal y attribution_ad_id como fallback.
+**La solución:** Sistema dual que usa tracking.sessions como principal y rstk_adid como fallback.
 
-**Cómo funciona:** Cuando alguien convierte, buscamos su "última sesión antes de convertir" para saber a qué campaña asignar el resultado. Si no hay datos de tracking, usamos el attribution_ad_id existente.
+**Cómo funciona:** Cuando alguien convierte, buscamos su "última sesión antes de convertir" para saber a qué campaña asignar el resultado. Si no hay datos de tracking, usamos el rstk_adid existente.
 
 **Estado:** ✅ IMPLEMENTADO Y FUNCIONANDO (21 Sept 2025)
 
@@ -140,7 +140,7 @@ Click en anuncio de TikTok
 ```sql
 -- Si el contacto NO tiene visitor_id
 -- O no se encuentran sesiones de tracking
--- Usar attribution_ad_id del contacto
+-- Usar rstk_adid del contacto
 ```
 
 ### ¿Cuándo se Usa Cada Sistema?
@@ -154,7 +154,7 @@ Click en anuncio de TikTok
 **Se usa Attribution Ad ID cuando:**
 - ✅ NO hay visitor_id en el contacto
 - ✅ NO se encuentran sesiones de tracking
-- ✅ Pero SÍ existe attribution_ad_id
+- ✅ Pero SÍ existe rstk_adid
 
 ### Regla de Oro: created_at es TODO
 
@@ -233,7 +233,7 @@ Cuando salga una nueva red social con ads:
 ### Para Datos Históricos (Una sola vez)
 
 **Contactos que ya existen:**
-1. Buscar si tienen `attribution_ad_id`
+1. Buscar si tienen `rstk_adid`
 2. Si sí → Mantener esa atribución
 3. Si no → Aplicar nueva lógica con tracking
 4. Llenar los vacíos del 30% que faltaba
@@ -260,7 +260,7 @@ Usuario agenda cita → Cita asignada a última campaña
 
 ### vs Sistema Anterior
 ```
-❌ ANTES: 30% sin atribución (attribution_ad_id faltante)
+❌ ANTES: 30% sin atribución (rstk_adid faltante)
 ✅ AHORA: 100% de atribución
 
 ❌ ANTES: Solo para anuncios de Facebook
@@ -338,7 +338,7 @@ Usuario agenda cita → Cita asignada a última campaña
 - El sistema detectó correctamente la sesión de tracking
 - Asoció el contacto a la campaña correcta por visitor_id
 - Los conteos se incrementaron correctamente
-- El fallback con attribution_ad_id sigue funcionando
+- El fallback con rstk_adid sigue funcionando
 
 ### Archivos Modificados
 
@@ -354,4 +354,4 @@ Usuario agenda cita → Cita asignada a última campaña
 
 ---
 
-**Sistema implementado y validado exitosamente. La atribución ahora funciona con tracking.sessions como principal y attribution_ad_id como fallback, recuperando el 100% de las atribuciones.**
+**Sistema implementado y validado exitosamente. La atribución ahora funciona con tracking.sessions como principal y rstk_adid como fallback, recuperando el 100% de las atribuciones.**

@@ -143,10 +143,12 @@ class ContactUnificationService {
         email = $4,
         phone = $5,
         company = $6,
-        attribution_ad_id = $7,
+        rstk_adid = $7,
         ext_crm_id = $8,
         source = $9,
         status = $10,
+        rstk_source = $11,
+        visitor_id = COALESCE($12, visitor_id),
         updated_at = NOW()
       WHERE contact_id = $1
       RETURNING *
@@ -159,10 +161,12 @@ class ContactUnificationService {
       unifiedData.email,
       unifiedData.phone,
       unifiedData.company,
-      unifiedData.attribution_ad_id,
+      unifiedData.rstk_adid || unifiedData.rstk_adid, // Compatibilidad temporal
       unifiedData.ext_crm_id,
       unifiedData.source,
-      unifiedData.status
+      unifiedData.status,
+      unifiedData.rstk_source,
+      unifiedData.visitor_id || unifiedData.rstk_vid  // IMPORTANTE: Actualizar visitor_id si viene nuevo
     ]);
 
     const updatedMaster = result.rows[0];
@@ -223,7 +227,7 @@ class ContactUnificationService {
     if (contact.company) score += 1;
 
     // Campos de tracking/attribution
-    if (contact.attribution_ad_id) score += 2;
+    if (contact.rstk_adid) score += 2;
     if (contact.ext_crm_id) score += 5; // Muy importante
 
     // Estado del cliente
@@ -246,9 +250,11 @@ class ContactUnificationService {
       merged.email = this.pickBest(merged.email, dup.email);
       merged.phone = this.pickBest(merged.phone, dup.phone);
       merged.company = this.pickBest(merged.company, dup.company);
-      merged.attribution_ad_id = this.pickBest(merged.attribution_ad_id, dup.attribution_ad_id);
+      merged.rstk_adid = this.pickBest(merged.rstk_adid, dup.rstk_adid);
       merged.ext_crm_id = this.pickBest(merged.ext_crm_id, dup.ext_crm_id);
       merged.source = this.pickBest(merged.source, dup.source);
+      merged.rstk_source = this.pickBest(merged.rstk_source, dup.rstk_source);
+      merged.visitor_id = this.pickBest(merged.visitor_id, dup.visitor_id);
 
       // Status: priorizar 'client' > 'appointment' > 'lead'
       merged.status = this.pickBestStatus(merged.status, dup.status);
@@ -261,11 +267,13 @@ class ContactUnificationService {
       merged.email = this.pickBest(merged.email, newData.email);
       merged.phone = this.pickBest(merged.phone, newData.phone);
       merged.company = this.pickBest(merged.company, newData.company);
-      merged.attribution_ad_id = this.pickBest(merged.attribution_ad_id,
-        newData.attribution_ad_id || newData.first_adid || newData.ad_id);
+      merged.rstk_adid = this.pickBest(merged.rstk_adid,
+        newData.rstk_adid || newData.first_adid || newData.ad_id);
       merged.ext_crm_id = this.pickBest(merged.ext_crm_id,
         newData.ext_crm_id || newData.ghl_contact_id);
       merged.source = this.pickBest(merged.source, newData.source);
+      merged.rstk_source = this.pickBest(merged.rstk_source, newData.rstk_source);
+      merged.visitor_id = this.pickBest(merged.visitor_id, newData.visitor_id || newData.rstk_vid);
       merged.status = this.pickBestStatus(merged.status, newData.status);
     }
 
@@ -350,13 +358,15 @@ class ContactUnificationService {
         email,
         phone,
         company,
-        attribution_ad_id,
+        rstk_adid,
+        rstk_source,
+        visitor_id,
         ext_crm_id,
         status,
         source,
         created_at,
         updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *
     `;
 
@@ -367,7 +377,9 @@ class ContactUnificationService {
       data.email || null,
       data.phone || null,
       data.company || null,
-      data.attribution_ad_id || data.first_adid || data.ad_id || null,
+      data.rstk_adid || data.first_adid || data.ad_id || null,
+      data.rstk_source || null,
+      data.visitor_id || data.rstk_vid || null,  // IMPORTANTE: Guardar visitor_id para tracking
       data.ext_crm_id || data.ghl_contact_id || null,
       data.status || 'lead',
       data.source || 'Direct',

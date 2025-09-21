@@ -49,7 +49,7 @@ class ReportsService {
           `SELECT DATE_TRUNC($1, NOW()) AS period, 0 AS visitors`,
           [unit]
         ),
-        // TODOS los contactos creados en el período (sin importar attribution_ad_id)
+        // TODOS los contactos creados en el período (sin importar rstk_adid)
         databasePool.query(
           `SELECT DATE_TRUNC($3, created_at) AS period,
                   COUNT(*) AS leads
@@ -196,7 +196,7 @@ class ReportsService {
   }
 
   async getAttributedMetrics(startDate, endDate, groupBy = 'month') {
-    // PESTAÑA "ATRIBUIDOS": Solo contactos con attribution_ad_id
+    // PESTAÑA "ATRIBUIDOS": Solo contactos con rstk_adid
     // Usa Last Attribution - TODO se basa en la fecha de creación del contacto
     const unit = ['day', 'month', 'year'].includes(groupBy) ? groupBy : 'month'
     try {
@@ -223,17 +223,17 @@ class ReportsService {
           `SELECT DATE_TRUNC($1, NOW()) AS period, 0 AS visitors`,
           [unit]
         ),
-        // Solo contactos con attribution_ad_id Y que coincidan con anuncio activo
+        // Solo contactos con rstk_adid Y que coincidan con anuncio activo
         databasePool.query(
           `SELECT DATE_TRUNC($3, c.created_at) AS period,
                   COUNT(*) AS leads
            FROM contacts c
            WHERE c.created_at >= $1 AND c.created_at <= $2
-             AND c.attribution_ad_id IS NOT NULL
+             AND c.rstk_adid IS NOT NULL
              -- Validar con ventana de atribución de 3 días
              AND EXISTS (
                SELECT 1 FROM meta.meta_ads ma
-               WHERE ma.ad_id = c.attribution_ad_id
+               WHERE ma.ad_id = c.rstk_adid
                  AND (
                    ma.date::date = c.created_at::date
                    OR (
@@ -253,11 +253,11 @@ class ReportsService {
            FROM contacts c
            JOIN appointments a ON a.contact_id = c.contact_id
            WHERE c.created_at >= $1 AND c.created_at <= $2
-             AND c.attribution_ad_id IS NOT NULL
+             AND c.rstk_adid IS NOT NULL
              -- Validar con ventana de atribución de 3 días
              AND EXISTS (
                SELECT 1 FROM meta.meta_ads ma
-               WHERE ma.ad_id = c.attribution_ad_id
+               WHERE ma.ad_id = c.rstk_adid
                  AND (
                    ma.date::date = c.created_at::date
                    OR (
@@ -288,11 +288,11 @@ class ReportsService {
                   )), 0) AS revenue
            FROM contacts c
            WHERE c.created_at >= $1 AND c.created_at <= $2
-             AND c.attribution_ad_id IS NOT NULL
+             AND c.rstk_adid IS NOT NULL
              -- Validar con ventana de atribución de 3 días
              AND EXISTS (
                SELECT 1 FROM meta.meta_ads ma
-               WHERE ma.ad_id = c.attribution_ad_id
+               WHERE ma.ad_id = c.rstk_adid
                  AND (
                    ma.date::date = c.created_at::date
                    OR (
@@ -305,13 +305,13 @@ class ReportsService {
            ORDER BY period`,
           [startDate, endDate, unit]
         ),
-        // Clientes nuevos: contactos con attribution_ad_id creados en el período QUE TIENEN PAGOS
+        // Clientes nuevos: contactos con rstk_adid creados en el período QUE TIENEN PAGOS
         databasePool.query(
           `SELECT DATE_TRUNC($3, c.created_at) AS period,
                   COUNT(DISTINCT c.contact_id) AS new_customers
            FROM contacts c
            WHERE c.created_at >= $1 AND c.created_at <= $2
-             AND c.attribution_ad_id IS NOT NULL
+             AND c.rstk_adid IS NOT NULL
              -- Solo contar los que tienen pagos completados (son clientes reales)
              AND EXISTS (
                SELECT 1 FROM payments p 
@@ -321,7 +321,7 @@ class ReportsService {
              -- Validar con ventana de atribución de 3 días
              AND EXISTS (
                SELECT 1 FROM meta.meta_ads ma
-               WHERE ma.ad_id = c.attribution_ad_id
+               WHERE ma.ad_id = c.rstk_adid
                  AND (
                    ma.date::date = c.created_at::date
                    OR (
@@ -445,7 +445,7 @@ class ReportsService {
             c.last_name,
             c.email,
             c.phone,
-            c.attribution_ad_id,
+            c.rstk_adid,
             c.created_at as contact_created_at,
             MIN(COALESCE(p.paid_at, p.created_at)) as first_payment_date,
             MAX(COALESCE(p.paid_at, p.created_at)) as last_payment_date,
@@ -463,7 +463,7 @@ class ReportsService {
           WHERE p.status = 'completed'
             AND COALESCE(p.paid_at, p.created_at) >= $1
             AND COALESCE(p.paid_at, p.created_at) <= $2
-          GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.attribution_ad_id, c.created_at
+          GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.rstk_adid, c.created_at
         )
         SELECT * FROM client_sales
         ORDER BY first_payment_date DESC
@@ -484,7 +484,7 @@ class ReportsService {
           last_name: row.last_name,
           email: row.email,
           phone: row.phone,
-          attribution_ad_id: row.attribution_ad_id
+          rstk_adid: row.rstk_adid
         }
       }))
     } catch (error) {
@@ -493,7 +493,7 @@ class ReportsService {
     }
   }
 
-  // Obtener ventas atribuidas (SOLO CON ATTRIBUTION_AD_ID) - Total lifetime value
+  // Obtener ventas atribuidas (SOLO CON rstk_adid) - Total lifetime value
   async getSalesDetailsAttributed(startDate, endDate) {
     try {
       const result = await databasePool.query(`
@@ -502,11 +502,11 @@ class ReportsService {
           SELECT DISTINCT c.contact_id
           FROM contacts c
           WHERE c.created_at >= $1 AND c.created_at <= $2
-            AND c.attribution_ad_id IS NOT NULL
+            AND c.rstk_adid IS NOT NULL
             -- Validar con ventana de atribución de 3 días
             AND EXISTS (
               SELECT 1 FROM meta.meta_ads ma
-              WHERE ma.ad_id = c.attribution_ad_id
+              WHERE ma.ad_id = c.rstk_adid
                 AND (
                   ma.date::date = c.created_at::date
                   OR (
@@ -524,7 +524,7 @@ class ReportsService {
             c.last_name,
             c.email,
             c.phone,
-            c.attribution_ad_id,
+            c.rstk_adid,
             c.created_at as contact_created_at,
             MIN(COALESCE(p.paid_at, p.created_at)) as first_payment_date,
             MAX(COALESCE(p.paid_at, p.created_at)) as last_payment_date,
@@ -541,7 +541,7 @@ class ReportsService {
           INNER JOIN contacts c ON ac.contact_id = c.contact_id
           INNER JOIN payments p ON c.contact_id = p.contact_id
           WHERE p.status = 'completed'
-          GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.attribution_ad_id, c.created_at
+          GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.rstk_adid, c.created_at
         )
         SELECT * FROM client_lifetime_sales
         ORDER BY contact_created_at DESC
@@ -562,7 +562,7 @@ class ReportsService {
           last_name: row.last_name,
           email: row.email,
           phone: row.phone,
-          attribution_ad_id: row.attribution_ad_id
+          rstk_adid: row.rstk_adid
         }
       }))
     } catch (error) {
@@ -583,7 +583,7 @@ class ReportsService {
           phone,
           status,
           created_at,
-          attribution_ad_id
+          rstk_adid
         FROM contacts
         WHERE created_at >= $1 AND created_at <= $2
         ORDER BY created_at DESC
@@ -596,7 +596,7 @@ class ReportsService {
     }
   }
 
-  // Obtener leads atribuidos (SOLO CON ATTRIBUTION_AD_ID)
+  // Obtener leads atribuidos (SOLO CON rstk_adid)
   async getLeadsDetailsAttributed(startDate, endDate) {
     try {
       const result = await databasePool.query(`
@@ -608,14 +608,14 @@ class ReportsService {
           c.phone,
           c.status,
           c.created_at,
-          c.attribution_ad_id
+          c.rstk_adid
         FROM contacts c
         WHERE c.created_at >= $1 AND c.created_at <= $2
-          AND c.attribution_ad_id IS NOT NULL
+          AND c.rstk_adid IS NOT NULL
           -- Validar con ventana de atribución de 3 días
           AND EXISTS (
             SELECT 1 FROM meta.meta_ads ma
-            WHERE ma.ad_id = c.attribution_ad_id
+            WHERE ma.ad_id = c.rstk_adid
               AND (
                 ma.date::date = c.created_at::date
                 OR (
@@ -647,7 +647,7 @@ class ReportsService {
           c.last_name,
           c.email,
           c.phone,
-          c.attribution_ad_id
+          c.rstk_adid
         FROM appointments a
         LEFT JOIN contacts c ON a.contact_id = c.contact_id
         WHERE a.created_at >= $1 AND a.created_at <= $2
@@ -666,7 +666,7 @@ class ReportsService {
           last_name: row.last_name,
           email: row.email,
           phone: row.phone,
-          attribution_ad_id: row.attribution_ad_id
+          rstk_adid: row.rstk_adid
         } : null
       }))
     } catch (error) {
@@ -688,15 +688,15 @@ class ReportsService {
           c.last_name,
           c.email,
           c.phone,
-          c.attribution_ad_id
+          c.rstk_adid
         FROM appointments a
         JOIN contacts c ON a.contact_id = c.contact_id
         WHERE c.created_at >= $1 AND c.created_at <= $2
-          AND c.attribution_ad_id IS NOT NULL
+          AND c.rstk_adid IS NOT NULL
           -- Validar con ventana de atribución de 3 días
           AND EXISTS (
             SELECT 1 FROM meta.meta_ads ma
-            WHERE ma.ad_id = c.attribution_ad_id
+            WHERE ma.ad_id = c.rstk_adid
               AND (
                 ma.date::date = c.created_at::date
                 OR (
@@ -720,7 +720,7 @@ class ReportsService {
           last_name: row.last_name,
           email: row.email,
           phone: row.phone,
-          attribution_ad_id: row.attribution_ad_id
+          rstk_adid: row.rstk_adid
         }
       }))
     } catch (error) {
@@ -740,7 +740,7 @@ class ReportsService {
             c.last_name,
             c.email,
             c.phone,
-            c.attribution_ad_id,
+            c.rstk_adid,
             c.created_at as contact_created_at,
             MIN(COALESCE(p.paid_at, p.created_at)) as first_payment_date,
             SUM(p.amount) as total_amount,
@@ -748,7 +748,7 @@ class ReportsService {
           FROM contacts c
           INNER JOIN payments p ON c.contact_id = p.contact_id
           WHERE p.status = 'completed'
-          GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.attribution_ad_id, c.created_at
+          GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.rstk_adid, c.created_at
           HAVING MIN(COALESCE(p.paid_at, p.created_at)) >= $1
             AND MIN(COALESCE(p.paid_at, p.created_at)) <= $2
         )
@@ -764,7 +764,7 @@ class ReportsService {
         phone: row.phone,
         created_at: row.contact_created_at,
         status: 'client',
-        attribution_ad_id: row.attribution_ad_id,
+        rstk_adid: row.rstk_adid,
         first_payment_date: row.first_payment_date,
         total_amount: parseFloat(row.total_amount),
         payment_count: row.payment_count
@@ -775,7 +775,7 @@ class ReportsService {
     }
   }
 
-  // Obtener clientes nuevos atribuidos - contactos con attribution_ad_id creados en el período QUE TIENEN PAGOS
+  // Obtener clientes nuevos atribuidos - contactos con rstk_adid creados en el período QUE TIENEN PAGOS
   async getNewCustomersDetailsAttributed(startDate, endDate) {
     try {
       const result = await databasePool.query(`
@@ -786,7 +786,7 @@ class ReportsService {
             c.last_name,
             c.email,
             c.phone,
-            c.attribution_ad_id,
+            c.rstk_adid,
             c.created_at as contact_created_at,
             MIN(COALESCE(p.paid_at, p.created_at)) as first_payment_date,
             SUM(p.amount) as total_amount,
@@ -794,12 +794,12 @@ class ReportsService {
           FROM contacts c
           INNER JOIN payments p ON c.contact_id = p.contact_id
           WHERE c.created_at >= $1 AND c.created_at <= $2
-            AND c.attribution_ad_id IS NOT NULL
+            AND c.rstk_adid IS NOT NULL
             AND p.status = 'completed'
             -- Validar con ventana de atribución de 3 días
             AND EXISTS (
               SELECT 1 FROM meta.meta_ads ma
-              WHERE ma.ad_id = c.attribution_ad_id
+              WHERE ma.ad_id = c.rstk_adid
                 AND (
                   ma.date::date = c.created_at::date
                   OR (
@@ -808,7 +808,7 @@ class ReportsService {
                   )
                 )
             )
-          GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.attribution_ad_id, c.created_at
+          GROUP BY c.contact_id, c.first_name, c.last_name, c.email, c.phone, c.rstk_adid, c.created_at
         )
         SELECT * FROM attributed_customers
         ORDER BY contact_created_at DESC
@@ -822,7 +822,7 @@ class ReportsService {
         phone: row.phone,
         created_at: row.contact_created_at,
         status: 'client',
-        attribution_ad_id: row.attribution_ad_id,
+        rstk_adid: row.rstk_adid,
         first_payment_date: row.first_payment_date,
         total_amount: parseFloat(row.total_amount),
         payment_count: row.payment_count

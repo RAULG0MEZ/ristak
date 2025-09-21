@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { PageContainer, Card, Button, DatePicker, Modal } from '../ui'
+import { PageContainer, Card, Button, DatePicker, Modal, Badge } from '../ui'
 import { Icons } from '../icons'
 import { cn } from '../lib/utils'
 import { dateToApiString, subtractMonths } from '../lib/dateUtils'
@@ -64,6 +64,8 @@ export function Settings() {
   const [sinceDate, setSinceDate] = useState<string>('')
   const [schedule, setSchedule] = useState<string>('1h')
   const [showDisconnectModal, setShowDisconnectModal] = useState(false)
+  const [showReconfigureModal, setShowReconfigureModal] = useState(false)
+  const [isRevokingPermissions, setIsRevokingPermissions] = useState(false)
   const [isConfiguring, setIsConfiguring] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
   const [showImportModal, setShowImportModal] = useState(false)
@@ -158,10 +160,37 @@ export function Settings() {
     return dateToApiString(subtractMonths(new Date(), 35))
   }, [])
 
-  const handleMetaConfigureClick = () => {
+  const handleMetaConfigureClick = async (revokeFirst = false) => {
+    // Si está reconectando y queremos revocar primero
+    if (revokeFirst && metaConfig?.ad_account_id) {
+      setIsRevokingPermissions(true)
+      try {
+        console.log('Revocando permisos antes de reconectar...')
+        const revokeRes = await fetchWithAuth(getApiUrl('/meta/disconnect'), { method: 'POST' })
+        if (!revokeRes.ok) {
+          console.error('Error revocando permisos')
+          toast.error('Error', 'No se pudieron revocar los permisos. Intentando continuar...')
+        } else {
+          // Esperar un poco para que se procese la revocación
+          await new Promise(resolve => setTimeout(resolve, 1500))
+        }
+      } catch (err) {
+        console.error('Error al revocar permisos:', err)
+        toast.error('Error', 'No se pudieron revocar los permisos. Intentando continuar...')
+      }
+      setIsRevokingPermissions(false)
+    }
+
+    // Cerrar el modal de confirmación si está abierto
+    setShowReconfigureModal(false)
+
     const state = Math.random().toString(36).slice(2)
     const w = window.open(getApiUrl(`/meta/oauth/start?state=${state}`), 'MetaLogin', 'width=700,height=800')
-    if (!w) return
+    if (!w) {
+      toast.error('Error', 'No se pudo abrir la ventana de autenticación. Verifica tu bloqueador de pop-ups.')
+      return
+    }
+
     const onMsg = async (ev: MessageEvent) => {
       if (!ev?.data || ev.data.source !== 'ristak') return
       if (ev.data.type === 'meta-oauth-success') {
@@ -169,14 +198,14 @@ export function Settings() {
         // Fetch ad accounts and open modal
         try {
           const res = await fetchWithAuth(getApiUrl('/meta/adaccounts'))
-          
+
           if (!res.ok) {
             throw new Error(`Error al cargar cuentas de anuncios: ${res.status}`)
           }
-          
+
           const json = await res.json()
           setAdAccounts(json?.data || [])
-          
+
           // Reset form state
           setSelectedAdAccount('')
           setSelectedPixel('')
@@ -184,7 +213,7 @@ export function Settings() {
           setSinceDate(dateToApiString(subtractMonths(new Date(), 34)))
           setSchedule('1h')
           setConfigError(null)
-          
+
           setShowMetaModal(true)
         } catch (e) {
           console.error('Failed to load ad accounts', e)
@@ -199,22 +228,22 @@ export function Settings() {
     setSelectedAdAccount(id)
     setSelectedPixel('')
     setConfigError(null)
-    
+
     if (!id) {
       setPixels([])
       return
     }
-    
+
     try {
       const res = await fetchWithAuth(getApiUrl(`/meta/pixels?ad_account_id=${encodeURIComponent(id)}`))
-      
+
       if (!res.ok) {
         throw new Error(`Error al cargar pixels: ${res.status}`)
       }
-      
+
       const json = await res.json()
       setPixels(json?.data || [])
-      
+
     } catch (e) {
       console.error('Failed to load pixels', e)
       setConfigError('Error al cargar los pixels. Por favor intenta seleccionar otra cuenta.')
@@ -746,7 +775,12 @@ export function Settings() {
                             <Icons.meta className="w-6 h-6 text-info" />
                           </div>
                           <div>
-                            <h4 className="font-medium text-primary">Meta Ads</h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-medium text-primary">Meta Ads</h4>
+                              <Badge variant={metaConfig?.ad_account_id ? "success" : "warning"}>
+                                {metaConfig?.ad_account_id ? 'Conectado' : 'Desconectado'}
+                              </Badge>
+                            </div>
                             <p className="text-sm text-secondary">Sincronización de campañas y métricas</p>
                             {metaConfig?.ad_account_id && (
                               <div className="mt-2 text-xs text-tertiary">
@@ -759,17 +793,24 @@ export function Settings() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={cn("px-2 py-1 text-xs rounded-full glass", metaConfig?.ad_account_id ? "text-success" : "text-warning")}>{metaConfig?.ad_account_id ? 'Conectado' : 'Desconectado'}</span>
                           {metaConfig?.ad_account_id ? (
                             <>
-                              <Button variant="secondary" size="sm" onClick={handleMetaConfigureClick}>Reconfigurar</Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setShowReconfigureModal(true)}
+                                title="Reconfigurar conexión con Meta"
+                              >
+                                <Icons.refresh className="w-4 h-4 mr-1" />
+                                Reconfigurar
+                              </Button>
                               <Button variant="secondary" size="sm" onClick={() => setShowDisconnectModal(true)} className="text-error">
                                 <Icons.x className="w-4 h-4 mr-1" />
                                 Desconectar
                               </Button>
                             </>
                           ) : (
-                            <Button variant="secondary" size="sm" onClick={handleMetaConfigureClick}>Conectar</Button>
+                            <Button variant="secondary" size="sm" onClick={() => handleMetaConfigureClick(false)}>Conectar</Button>
                           )}
                         </div>
                       </div>
@@ -791,14 +832,14 @@ export function Settings() {
                             <Icons.zap className="w-6 h-6 text-accent-purple" />
                           </div>
                           <div>
-                            <h4 className="font-medium text-primary">GoHighLevel</h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-medium text-primary">GoHighLevel</h4>
+                              <Badge variant="success">Conectado</Badge>
+                            </div>
                             <p className="text-sm text-secondary">Webhooks para contactos y pagos</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-1 glass text-success text-xs rounded-full">Conectado</span>
-                          <Button variant="secondary" size="sm">Configurar</Button>
-                        </div>
+                        <Button variant="secondary" size="sm">Configurar</Button>
                       </div>
                     </Card>
 
@@ -809,8 +850,11 @@ export function Settings() {
                             <Icons.google className="w-6 h-6 text-secondary" />
                           </div>
                           <div>
-                            <h4 className="font-medium text-primary">Google Ads</h4>
-                            <p className="text-sm text-secondary">Próximamente disponible</p>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-medium text-primary">Google Ads</h4>
+                              <Badge variant="neutral">Próximamente</Badge>
+                            </div>
+                            <p className="text-sm text-secondary">Sincronización de campañas</p>
                           </div>
                         </div>
                         <Button variant="secondary" size="sm" disabled>Conectar</Button>
@@ -961,8 +1005,8 @@ export function Settings() {
         </div>
       </div>
       {/* Meta configuration modal */}
-      <Modal 
-        isOpen={showMetaModal} 
+      <Modal
+        isOpen={showMetaModal}
         onClose={() => setShowMetaModal(false)}
         title="Configurar Meta Ads"
         icon={<Icons.meta className="w-6 h-6" />}
@@ -1043,6 +1087,65 @@ export function Settings() {
               </div>
       </Modal>
       
+      {/* Reconfigure confirmation modal */}
+      <Modal
+        isOpen={showReconfigureModal}
+        onClose={() => !isRevokingPermissions && setShowReconfigureModal(false)}
+        title="Confirmar reconfiguración"
+        size="md"
+      >
+        <div className="space-y-4">
+          {!isRevokingPermissions ? (
+            <>
+              <div className="flex items-center gap-3 p-3 glass border border-glassBorder rounded-lg">
+                <Icons.info className="w-5 h-5 text-info flex-shrink-0" />
+                <div className="text-sm">
+                  <p className="text-primary font-medium">¿Deseas reconfigurar tu conexión con Meta?</p>
+                  <p className="text-secondary mt-1">
+                    Se revocarán los permisos actuales y podrás:
+                  </p>
+                  <ul className="text-secondary mt-2 ml-4 list-disc space-y-1 text-xs">
+                    <li>Seleccionar diferentes portfolios comerciales</li>
+                    <li>Cambiar la cuenta de anuncios</li>
+                    <li>Actualizar el pixel de seguimiento</li>
+                    <li>Modificar el periodo de sincronización</li>
+                  </ul>
+                  <p className="text-warning mt-2 text-xs">
+                    Nota: Los datos actuales se mantendrán hasta completar la nueva configuración.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="secondary" size="sm" onClick={() => setShowReconfigureModal(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleMetaConfigureClick(true)}
+                >
+                  <Icons.refresh className="w-4 h-4 mr-2" />
+                  Continuar con reconfiguración
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+              <div className="relative">
+                <div className="w-16 h-16 border-4 border-glassBorder rounded-full"></div>
+                <div className="absolute top-0 left-0 w-16 h-16 border-4 border-primary rounded-full animate-spin border-t-transparent"></div>
+              </div>
+              <div className="text-center">
+                <p className="text-primary font-medium">Revocando permisos anteriores...</p>
+                <p className="text-secondary text-sm mt-2">
+                  En un momento se abrirá la ventana de autorización de Meta
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
       {/* Disconnect confirmation modal */}
       <Modal
         isOpen={showDisconnectModal}
@@ -1062,9 +1165,9 @@ export function Settings() {
                   <Button variant="secondary" size="sm" onClick={() => setShowDisconnectModal(false)}>
                     Cancelar
                   </Button>
-                  <Button 
-                    variant="danger" 
-                    size="sm" 
+                  <Button
+                    variant="danger"
+                    size="sm"
                     onClick={handleDisconnect}
                   >
                     <Icons.x className="w-4 h-4 mr-2" />

@@ -268,20 +268,137 @@ export function Reports() {
     setSortDirection(direction)
   }
 
+  const months = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ]
+
+  // Obtener fechas de inicio y fin del período
+  const getPeriodDates = (date: string) => {
+    // date viene en formato YYYY-MM-DD o YYYY-MM o YYYY
+    let start: string, end: string
+
+    if (viewType === 'year') {
+      // Para año: YYYY
+      const year = date.substring(0, 4)
+      start = `${year}-01-01`
+      end = `${year}-12-31`
+    } else if (viewType === 'month') {
+      // Para mes: YYYY-MM
+      const [year, month] = date.split('-')
+      start = `${year}-${month}-01`
+      // Obtener el último día del mes
+      const lastDay = getLastDayOfMonth(parseInt(year), parseInt(month) - 1)
+      end = `${year}-${month}-${String(lastDay).padStart(2, '0')}`
+    } else {
+      // Para día: YYYY-MM-DD
+      start = date
+      end = date
+    }
+
+    return {
+      start: start,
+      end: end
+    }
+  }
+
+  // Formatear fecha según el tipo de vista
+  const formatDateByView = (date: string) => {
+    // Para vista por día, mostrar el día específico
+    if (viewType === 'day') {
+      // La fecha viene en formato YYYY-MM-DD
+      if (!date || !date.includes('-')) {
+        console.warn('Formato de fecha inválido:', date)
+        return date
+      }
+
+      const parts = date.split('-')
+      if (parts.length !== 3) {
+        console.warn('Fecha no tiene el formato esperado:', date)
+        return date
+      }
+
+      const [yearStr, monthStr, dayStr] = parts
+      const year = parseInt(yearStr, 10)
+      const month = parseInt(monthStr, 10)
+      const day = parseInt(dayStr, 10)
+
+      // Validar que los valores sean números válidos
+      if (isNaN(year) || isNaN(month) || isNaN(day)) {
+        console.warn('Valores de fecha inválidos:', { year, month, day })
+        return date
+      }
+
+      const monthName = months[month - 1]
+      if (!monthName) {
+        console.warn('Mes inválido:', month)
+        return date
+      }
+
+      // Retornar formato: "21 sep 2025"
+      return `${day} ${monthName.toLowerCase().substring(0, 3)} ${year}`
+    }
+
+    if (viewType === 'month' && date.match(/^\d{4}-\d{2}$/)) {
+      const [year, month] = date.split('-').map(Number)
+      const monthName = months[month - 1]
+      return `${monthName} ${year}`
+    }
+
+    const d = new Date(date)
+
+    if (viewType === 'year') {
+      return formatYear(d)
+    } else if (viewType === 'month') {
+      return formatMonthYear(d)
+    } else {
+      return formatDateShort(d)  // Por defecto usar formato corto
+    }
+  }
+
   // Configuración de columnas con persistencia
   // Usar diferentes claves de almacenamiento para cada tipo de reporte
   const storageKey = `reports_columns_config_${reportType}`
-  // Definir todas las columnas primero
-  const allColumns = [
+  // Definir todas las columnas primero - IMPORTANTE: usar useMemo para que se recalcule con viewType
+  const allColumns = useMemo(() => [
     {
       id: 'date',
       label: viewType === 'year' ? 'Año' : viewType === 'month' ? 'Mes' : 'Fecha',
       visible: true,
       fixed: true,
       align: 'left' as const,
-      render: (value: any) => (
-        <span className="font-medium text-primary">{formatDateByView(value)}</span>
-      )
+      render: (value: any) => {
+        // Obtener viewType actual del estado del componente
+        const currentViewType = viewType
+        console.log('Renderizando fecha - currentViewType:', currentViewType, 'value:', value)
+
+        // Formatear fecha según el tipo de vista ACTUAL
+        let formatted: string
+        if (currentViewType === 'day') {
+          // Para vista por día, mostrar el día específico
+          if (!value || !value.includes('-')) {
+            formatted = value
+          } else {
+            const parts = value.split('-')
+            if (parts.length === 3) {
+              const [yearStr, monthStr, dayStr] = parts
+              const month = parseInt(monthStr, 10)
+              const monthName = months[month - 1]
+              formatted = monthName
+                ? `${parseInt(dayStr, 10)} ${monthName.toLowerCase().substring(0, 3)} ${yearStr}`
+                : value
+            } else {
+              formatted = value
+            }
+          }
+        } else {
+          // Para otras vistas, usar la función existente
+          formatted = formatDateByView(value)
+        }
+
+        console.log('Fecha formateada:', formatted)
+        return <span className="font-medium text-primary">{formatted}</span>
+      }
     },
     {
       id: 'roas',
@@ -338,6 +455,9 @@ export function Reports() {
         <button
           onClick={() => {
             const period = getPeriodDates(row.date)
+            console.log('Vista actual:', viewType)
+            console.log('Fecha de la fila:', row.date)
+            console.log('Período calculado:', period)
             setSelectedPeriod(period)
             setModalType('sales')
           }}
@@ -437,7 +557,7 @@ export function Reports() {
         <span className="text-secondary">{value ? formatCurrency(value) : '—'}</span>
       )
     }
-  ]
+  ], [viewType, reportType]) // Solo viewType y reportType como dependencias
 
   const { columns: rawColumns, handleColumnReorder, handleColumnVisibilityChange } = useColumnsConfig(
     storageKey,
@@ -454,68 +574,8 @@ export function Reports() {
   const avgTicket = totals.sales > 0 ? totals.revenue / totals.sales : 0
   const expensePercentage = totals.revenue > 0 ? (totals.spend / totals.revenue) * 100 : 0
 
-  const months = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-  ]
-
   const currentYear = getCurrentYear()
   const years = Array.from({ length: 5 }, (_, i) => currentYear - i)
-
-  // Obtener fechas de inicio y fin del período
-  const getPeriodDates = (date: string) => {
-    // date viene en formato YYYY-MM-DD o YYYY-MM o YYYY
-    let start: string, end: string
-    
-    if (viewType === 'year') {
-      // Para año: YYYY
-      const year = date.substring(0, 4)
-      start = `${year}-01-01`
-      end = `${year}-12-31`
-    } else if (viewType === 'month') {
-      // Para mes: YYYY-MM
-      const [year, month] = date.split('-')
-      start = `${year}-${month}-01`
-      // Obtener el último día del mes
-      const lastDay = getLastDayOfMonth(parseInt(year), parseInt(month) - 1)
-      end = `${year}-${month}-${String(lastDay).padStart(2, '0')}`
-    } else {
-      // Para día: YYYY-MM-DD
-      start = date
-      end = date
-    }
-    
-    return {
-      start: start,
-      end: end
-    }
-  }
-
-  // Formatear fecha según el tipo de vista
-  const formatDateByView = (date: string) => {
-    // Para vista por día, formatear como día específico
-    if (viewType === 'day') {
-      // Si la fecha viene en formato YYYY-MM-DD, mostrar día específico
-      const d = new Date(date + 'T12:00:00')  // Agregar hora para evitar problemas de timezone
-      return formatDateShort(d)  // Esto mostrará "15 sep 2024"
-    }
-
-    if (viewType === 'month' && date.match(/^\d{4}-\d{2}$/)) {
-      const [year, month] = date.split('-').map(Number)
-      const monthName = months[month - 1]
-      return `${monthName} ${year}`
-    }
-
-    const d = new Date(date)
-
-    if (viewType === 'year') {
-      return formatYear(d)
-    } else if (viewType === 'month') {
-      return formatMonthYear(d)
-    } else {
-      return formatDateShort(d)  // Por defecto usar formato corto
-    }
-  }
 
   const exportToCSV = () => {
     const salesHeader = reportType === 'cashflow' ? 'Transacciones' : 'Ventas'
@@ -699,6 +759,7 @@ export function Reports() {
         {/* Tabla o Tarjetas de métricas */}
         {displayMode === 'table' ? (
           <TableWithControls
+            key={`table-${viewType}-${reportType}`} // Forzar re-render cuando cambie la vista
             hasSearch={true}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}

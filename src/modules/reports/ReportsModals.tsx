@@ -12,7 +12,7 @@ interface Contact {
   phone: string
   created_at: string
   status: string
-  attribution_ad_id: string | null
+  rstk_adid: string | null
 }
 
 interface Payment {
@@ -79,13 +79,15 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
 
   const loadSales = async () => {
     setLoading(true)
+    console.log('Modal cargando ventas con fechas:', { periodStart, periodEnd })
     try {
       // Para "Todos": todas las ventas en el período
-      // Para "Atribuidos": solo ventas de contactos con attribution_ad_id creados en el período
-      const endpoint = reportType === 'campaigns' 
+      // Para "Atribuidos": solo ventas de contactos con rstk_adid creados en el período
+      const endpoint = reportType === 'campaigns'
         ? `/reports/sales/attributed?start=${periodStart}&end=${periodEnd}`
         : `/reports/sales?start=${periodStart}&end=${periodEnd}`
-      
+
+      console.log('Endpoint de ventas:', endpoint)
       const res = await fetchWithAuth(getApiUrl(endpoint))
       if (!res.ok) throw new Error('Failed to load sales')
       const data = await res.json()
@@ -102,7 +104,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
     setLoading(true)
     try {
       // Para "Todos": todos los leads creados en el período
-      // Para "Atribuidos": solo leads con attribution_ad_id creados en el período
+      // Para "Atribuidos": solo leads con rstk_adid creados en el período
       const endpoint = reportType === 'campaigns'
         ? `/reports/leads/attributed?start=${periodStart}&end=${periodEnd}`
         : `/reports/leads?start=${periodStart}&end=${periodEnd}`
@@ -123,7 +125,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
     setLoading(true)
     try {
       // Para "Todos": todas las citas creadas en el período
-      // Para "Atribuidos": solo citas de contactos con attribution_ad_id
+      // Para "Atribuidos": solo citas de contactos con rstk_adid
       const endpoint = reportType === 'campaigns'
         ? `/reports/appointments/attributed?start=${periodStart}&end=${periodEnd}`
         : `/reports/appointments?start=${periodStart}&end=${periodEnd}`
@@ -230,8 +232,8 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
       label: 'Atribución',
       visible: reportType === 'campaigns',
       render: (_: any, row: Payment) => (
-        <Badge variant={row.contact?.attribution_ad_id ? 'default' : 'secondary'}>
-          {row.contact?.attribution_ad_id ? 'Atribuido' : 'Sin atribución'}
+        <Badge variant={row.contact?.rstk_adid ? 'default' : 'secondary'}>
+          {row.contact?.rstk_adid ? 'Atribuido' : 'Sin atribución'}
         </Badge>
       )
     }
@@ -292,8 +294,8 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
       label: 'Atribución',
       visible: reportType === 'campaigns',
       render: (_: any, row: Contact) => (
-        <Badge variant={row.attribution_ad_id ? 'default' : 'secondary'}>
-          {row.attribution_ad_id ? 'Atribuido' : 'Sin atribución'}
+        <Badge variant={row.rstk_adid ? 'default' : 'secondary'}>
+          {row.rstk_adid ? 'Atribuido' : 'Sin atribución'}
         </Badge>
       )
     }
@@ -355,8 +357,8 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
       label: 'Atribución',
       visible: reportType === 'campaigns',
       render: (_: any, row: Appointment) => (
-        <Badge variant={row.contact?.attribution_ad_id ? 'default' : 'secondary'}>
-          {row.contact?.attribution_ad_id ? 'Atribuido' : 'Sin atribución'}
+        <Badge variant={row.contact?.rstk_adid ? 'default' : 'secondary'}>
+          {row.contact?.rstk_adid ? 'Atribuido' : 'Sin atribución'}
         </Badge>
       )
     }
@@ -443,8 +445,8 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
       label: 'Atribución',
       visible: true,
       render: (_: any, row: Contact) => (
-        <Badge variant={row.attribution_ad_id ? 'default' : 'secondary'}>
-          {row.attribution_ad_id ? 'Atribuido' : 'Sin atribución'}
+        <Badge variant={row.rstk_adid ? 'default' : 'secondary'}>
+          {row.rstk_adid ? 'Atribuido' : 'Sin atribución'}
         </Badge>
       )
     }

@@ -108,7 +108,7 @@ async function processContact(contact) {
         last_name = $3,
         phone = $4,
         company = $5,
-        attribution_ad_id = $6,
+        rstk_adid = $6,
         source = $7,
         updated_at = NOW()
       WHERE ext_crm_id = $8
@@ -131,7 +131,7 @@ async function processContact(contact) {
     const insertQuery = `
       INSERT INTO contacts (
         contact_id, ext_crm_id, email, first_name, last_name, phone, company, 
-        status, attribution_ad_id, source, created_at, updated_at
+        status, rstk_adid, source, created_at, updated_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
     `;
     

@@ -42,11 +42,11 @@ export function MyCards() {
                   </div>
                   <span className="text-white font-semibold">{card.name}</span>
                 </div>
-                <span className="text-white/80 text-sm font-medium uppercase">{card.type}</span>
+                <span className="text-white text-sm font-medium uppercase">{card.type}</span>
               </div>
 
               <div>
-                <p className="text-white/60 text-xs mb-1">Total Balance</p>
+                <p className="text-gray-100 text-xs mb-1">Total Balance</p>
                 <p className="text-white text-2xl font-bold">
                   {formatCurrency(card.balance)}
                 </p>

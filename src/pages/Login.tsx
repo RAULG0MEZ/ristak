@@ -47,8 +47,7 @@ export function Login() {
         throw new Error(data.error || 'Error al iniciar sesión');
       }
 
-      login(data.token, data.accountName || 'Usuario');
-      localStorage.setItem('user_email', data.email || email);
+      login(data.token, data.accountName || 'Usuario', data.email || email);
 
       // Redirect to the route the user attempted to access or dashboard
       navigate(fromPath === '/login' ? '/' : fromPath, { replace: true });

@@ -285,44 +285,65 @@ class DashboardService {
 
   async getTrafficSources(startDate, endDate) {
     try {
-      // Query para obtener datos reales de tracking.sessions
+      // Query que identifica Instagram Ads vs Facebook Ads basándose en browser y site_source_name
       const query = `
         WITH traffic_data AS (
           SELECT
             CASE
-              -- Facebook Ads (por fbclid o utm_source)
-              WHEN utm_source ILIKE '%facebook%' OR utm_source ILIKE '%fb%' OR fbclid IS NOT NULL THEN 'Facebook Ads'
+              -- Instagram Ads (cuando viene de Instagram app o site_source es 'ig')
+              WHEN browser = 'Instagram' OR site_source_name = 'ig' THEN 'Instagram Ads'
 
-              -- Google Ads (por gclid o utm_source)
-              WHEN utm_source ILIKE '%google%' OR gclid IS NOT NULL THEN 'Google Ads'
+              -- Facebook Ads (cuando viene de Facebook app o site_source es 'fb' o tiene fbclid)
+              WHEN browser = 'Facebook' OR site_source_name = 'fb' OR fbclid IS NOT NULL THEN 'Facebook Ads'
 
-              -- Instagram
-              WHEN utm_source ILIKE '%instagram%' OR utm_source ILIKE '%ig%' THEN 'Instagram'
+              -- Google Ads
+              WHEN gclid IS NOT NULL OR utm_source ILIKE '%google%' THEN 'Google Ads'
 
               -- TikTok
-              WHEN utm_source ILIKE '%tiktok%' OR ttclid IS NOT NULL THEN 'TikTok'
+              WHEN ttclid IS NOT NULL OR utm_source ILIKE '%tiktok%' THEN 'TikTok Ads'
+
+              -- LinkedIn
+              WHEN li_fat_id IS NOT NULL OR utm_source ILIKE '%linkedin%' THEN 'LinkedIn Ads'
+
+              -- Twitter/X
+              WHEN twclid IS NOT NULL OR utm_source ILIKE '%twitter%' THEN 'Twitter/X Ads'
+
+              -- Pinterest
+              WHEN epik IS NOT NULL OR utm_source ILIKE '%pinterest%' THEN 'Pinterest Ads'
+
+              -- Snapchat
+              WHEN sc_click_id IS NOT NULL OR utm_source ILIKE '%snapchat%' THEN 'Snapchat Ads'
+
+              -- Reddit
+              WHEN rdt_cid IS NOT NULL OR utm_source ILIKE '%reddit%' THEN 'Reddit Ads'
 
               -- Email
               WHEN utm_medium ILIKE '%email%' OR utm_source ILIKE '%email%' THEN 'Email'
 
-              -- Orgánico (viene de búsqueda pero sin utm)
-              WHEN referrer_domain ILIKE '%google.%' AND utm_source IS NULL THEN 'Orgánico'
+              -- WhatsApp
+              WHEN referrer_domain ILIKE '%whatsapp%' OR utm_source ILIKE '%whatsapp%' THEN 'WhatsApp'
+
+              -- Orgánico (búsqueda sin publicidad)
+              WHEN referrer_domain ILIKE '%google.%' AND utm_source IS NULL AND gclid IS NULL THEN 'Orgánico'
               WHEN referrer_domain ILIKE '%bing.%' AND utm_source IS NULL THEN 'Orgánico'
               WHEN referrer_domain ILIKE '%yahoo.%' AND utm_source IS NULL THEN 'Orgánico'
               WHEN referrer_domain ILIKE '%duckduckgo.%' AND utm_source IS NULL THEN 'Orgánico'
 
-              -- Referidos (tiene referrer pero no es búsqueda ni social)
+              -- Referidos
               WHEN referrer_domain IS NOT NULL
                 AND referrer_domain NOT ILIKE '%google.%'
                 AND referrer_domain NOT ILIKE '%facebook%'
                 AND referrer_domain NOT ILIKE '%instagram%'
+                AND referrer_domain NOT ILIKE '%twitter%'
+                AND referrer_domain NOT ILIKE '%linkedin%'
+                AND referrer_domain NOT ILIKE '%whatsapp%'
                 AND utm_source IS NULL THEN 'Referidos'
 
-              -- Directo (sin referrer ni utm)
+              -- Directo
               WHEN referrer_domain IS NULL AND utm_source IS NULL THEN 'Directo'
 
               -- Otros
-              ELSE COALESCE(utm_source, 'Otros')
+              ELSE 'Otros'
             END as traffic_source
           FROM tracking.sessions
           WHERE created_at >= $1 AND created_at <= $2
@@ -344,17 +365,23 @@ class DashboardService {
         return [];
       }
 
-      // Asignar colores apropiados a cada fuente
+      // Colores oficiales 2024 de cada plataforma
       const colorMap = {
-        'Facebook Ads': '#1877F2',  // Azul Facebook
-        'Google Ads': '#4285F4',     // Azul Google
-        'Instagram': '#E4405F',      // Rosa Instagram
-        'TikTok': '#000000',        // Negro TikTok
-        'Email': '#10B981',         // Verde
-        'Orgánico': '#10B981',      // Verde
-        'Directo': '#8B5CF6',       // Morado
-        'Referidos': '#F59E0B',     // Amarillo
-        'Otros': '#6B7280'          // Gris
+        'Facebook Ads': '#1877f2',   // Azul Facebook oficial
+        'Instagram Ads': '#c32aa3',  // Magenta Instagram (color principal del gradiente)
+        'Google Ads': '#4285f4',      // Azul Google oficial
+        'TikTok Ads': '#ee1d52',      // Rosa-Rojo TikTok oficial
+        'LinkedIn Ads': '#0a66c2',    // Azul LinkedIn oficial
+        'Twitter/X Ads': '#000000',   // Negro X oficial
+        'Pinterest Ads': '#bd081c',   // Rojo Pinterest oficial
+        'Snapchat Ads': '#fffc00',    // Amarillo Snapchat oficial
+        'Reddit Ads': '#ff4301',      // Naranja-Rojo Reddit oficial
+        'WhatsApp': '#25d366',        // Verde WhatsApp oficial
+        'Email': '#ea4335',           // Rojo Gmail (más reconocible para email)
+        'Orgánico': '#34a853',        // Verde Google (para búsqueda orgánica)
+        'Directo': '#5865f2',         // Morado Discord-like (para tráfico directo)
+        'Referidos': '#fbbc05',       // Amarillo Google (para referidos)
+        'Otros': '#6b7280'            // Gris neutral
       };
 
       // Calcular cambios con período anterior
@@ -367,6 +394,25 @@ class DashboardService {
       const prevResult = await databasePool.query(query, [previousStartDate, previousEndDate]);
       const prevDataMap = new Map(prevResult.rows.map(row => [row.name, parseInt(row.value) || 0]));
 
+      // Mapa de íconos para cada plataforma (usando nombres de React Icons)
+      const iconMap = {
+        'Facebook Ads': 'FaFacebook',
+        'Instagram Ads': 'FaInstagram',
+        'Google Ads': 'FaGoogle',
+        'TikTok Ads': 'FaTiktok',
+        'LinkedIn Ads': 'FaLinkedin',
+        'Twitter/X Ads': 'FaXTwitter',
+        'Pinterest Ads': 'FaPinterest',
+        'Snapchat Ads': 'FaSnapchat',
+        'Reddit Ads': 'FaReddit',
+        'WhatsApp': 'FaWhatsapp',
+        'Email': 'HiMail',
+        'Orgánico': 'HiSearch',
+        'Directo': 'HiLink',
+        'Referidos': 'HiExternalLink',
+        'Otros': 'HiQuestionMarkCircle'
+      };
+
       const trafficSources = result.rows.map(row => {
         const currentValue = parseInt(row.value) || 0;
         const prevValue = prevDataMap.get(row.name) || 0;
@@ -376,7 +422,8 @@ class DashboardService {
           name: row.name,
           value: currentValue,
           percentage: Math.round(parseFloat(row.percentage) * 10) / 10, // Redondear a 1 decimal
-          color: colorMap[row.name] || '#6b7280',
+          color: colorMap[row.name] || '#6B7280',
+          icon: iconMap[row.name] || 'HiQuestionMarkCircle',
           change: Math.round(change * 100) / 100 // Redondear a 2 decimales
         };
       });

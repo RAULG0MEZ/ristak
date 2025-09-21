@@ -259,10 +259,10 @@ export function TableWithHierarchy({
                       <div className="mr-0.5">
                         <div className="relative w-4 h-6">
                           {/* L perfecta */}
-                          <div className="absolute left-0 top-0 border-l-2 border-b-2 border-gray-400/50 rounded-bl w-4 h-3"></div>
+                          <div className="absolute left-0 top-0 border-l-2 border-b-2 border-gray-400 rounded-bl w-4 h-3"></div>
                           {/* Flecha para anuncios (nivel 2) */}
                           {level === 2 && (
-                            <Icons.chevronRight className="absolute w-4 h-4 text-gray-400/50" style={{ left: '13px', top: '4.5px' }} />
+                            <Icons.chevronRight className="absolute w-4 h-4 text-gray-400" style={{ left: '13px', top: '4.5px' }} />
                           )}
                         </div>
                       </div>

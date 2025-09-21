@@ -804,7 +804,7 @@ router.post('/collect', async (req, res) => {
           phone: data.phone || null,
 
           // Attribution
-          attribution_ad_id: data.ad_id || data.fbclid || data.gclid ||
+          rstk_adid: data.ad_id || data.fbclid || data.gclid ||
                             data.utm_campaign || data.campaign_id || null,
 
           // Metadata

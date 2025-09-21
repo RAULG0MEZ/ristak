@@ -172,7 +172,7 @@ async function getReportNewCustomers(req, res) {
   }
 }
 
-// Obtener clientes nuevos atribuidos (contactos con attribution_ad_id creados en el período que tienen pagos)
+// Obtener clientes nuevos atribuidos (contactos con rstk_adid creados en el período que tienen pagos)
 async function getReportNewCustomersAttributed(req, res) {
   try {
     const { start, end } = req.query

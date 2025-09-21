@@ -14,7 +14,8 @@ model Contact {
   email           String?
   phone           String?
   company         String?
-  attributionAdId String?   @map("attribution_ad_id")
+  rstkAdid        String?   @map("rstk_adid")
+  rstkSource      String?   @map("rstk_source")
   ext_crm_id      String?   @unique(map: "contacts_ghl_id_key")
   status          String?
   source          String?
@@ -24,7 +25,7 @@ model Contact {
   visitor_id      String?   @db.VarChar(50)
   payments        Payment[]
 
-  @@index([attributionAdId])
+  @@index([rstkAdid])
   @@map("contacts")
 }
 

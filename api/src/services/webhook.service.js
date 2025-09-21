@@ -29,7 +29,9 @@ class WebhookService {
       email: data.email || null,
       phone: data.phone || null,
       company: data.company || null,
-      attribution_ad_id: data.first_adid || null, // Mapear first_adid a attribution_ad_id
+      rstk_adid: data.rstk_adid || data.first_adid || null, // Acepta rstk_adid o first_adid por compatibilidad
+      rstk_source: data.rstk_source || null, // Campo para el medio donde convirtió
+      visitor_id: data.rstk_vid || null, // IMPORTANTE: Guardar el visitor_id para tracking
       ext_crm_id: data.contact_id, // Usar contact_id como ext_crm_id
       status: data.status || 'lead',
       source: data.source || 'webhook'
