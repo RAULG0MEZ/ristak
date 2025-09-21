@@ -341,7 +341,7 @@ o.rstk_source=rstkData.rstk_source,
 !o.last_name&&rstkData.last_name&&(o.last_name=rstkData.last_name)}}catch(e){}
 // Luego intentar con _ud de GHL
 try{var r=a.getItem("_ud");if(r){var userData=JSON.parse(r);
-console.log("[HT] 🔐 _ud de GHL detectado");
+console.log("[HT] 🔐 _ud de GHL detectado:",userData);
 o.ghl_contact_id=userData.customer_id||userData.id,
 o.ghl_location_id=userData.location_id,
 !o.email&&userData.email&&(o.email=userData.email),
@@ -350,7 +350,24 @@ o.ghl_location_id=userData.location_id,
 !o.last_name&&(o.last_name=userData.last_name||userData.lastName),
 o.full_name=userData.full_name||userData.name,
 o.country=o.country||userData.country,
-userData.source&&(o.ghl_source=userData.source)}}catch(e){}
+userData.source&&(o.ghl_source=userData.source);
+// IMPORTANTE: Capturar campos de tracking directamente del _ud
+// GHL guarda rstk_vid, ad_id, utm_source, etc. como campos directos
+if(userData.rstk_vid){
+console.log("[HT] 🎯 rstk_vid encontrado en _ud:",userData.rstk_vid);
+o.rstk_vid=userData.rstk_vid
+}
+// También capturar ad_id y utm_source si vienen
+userData.ad_id&&(o.ad_id=userData.ad_id);
+userData.utm_source&&!o.utm_source&&(o.utm_source=userData.utm_source);
+userData.utm_medium&&!o.utm_medium&&(o.utm_medium=userData.utm_medium);
+userData.utm_campaign&&!o.utm_campaign&&(o.utm_campaign=userData.utm_campaign);
+userData.utm_content&&!o.utm_content&&(o.utm_content=userData.utm_content);
+userData.campaign_id&&!o.campaign_id&&(o.campaign_id=userData.campaign_id);
+userData.adset_id&&!o.adset_id&&(o.adset_id=userData.adset_id);
+userData.placement&&!o.placement&&(o.placement=userData.placement);
+userData.site_source_name&&!o.site_source_name&&(o.site_source_name=userData.site_source_name)
+}}catch(e){}
 Object.keys(o).forEach((function(e){null!=o[e]&&""!==o[e]||delete o[e]}));
 var cleanData={};Object.keys(o).forEach(function(k){if(o[k]!==null&&o[k]!==undefined&&o[k]!==""){cleanData[k]=o[k]}});
 console.group("[HT] 📤 Enviando: "+(n||"page_view"));
