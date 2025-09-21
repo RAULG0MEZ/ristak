@@ -821,11 +821,21 @@ router.post('/collect', async (req, res) => {
         const contactUnificationService = require('../services/contact-unification.service');
         const fingerprintUnificationService = require('../services/fingerprint-unification.service');
 
+        // IMPORTANTE: Los datos de attribution están en la SESIÓN ACTUAL
+        // El flujo es:
+        // 1. Usuario llega con parámetros de campaña a página de conversión
+        // 2. Llena formulario (aquí están los datos de attribution)
+        // 3. Es redirigido a thank you page (aquí aparece el _ud pero SIN parámetros)
+        // Por eso usamos los datos de la sesión ACTUAL que tiene los parámetros
+
         // Preparar datos para unificación inteligente
         const contactData = {
           // IDs
           ghl_contact_id: data.ghl_contact_id || null,
           ext_crm_id: data.ghl_contact_id || null,
+
+          // VISITOR ID - MUY IMPORTANTE PARA TRACKING
+          visitor_id: visitorId,
 
           // Datos personales
           first_name: data.first_name || data.firstName || null,
@@ -833,9 +843,13 @@ router.post('/collect', async (req, res) => {
           email: data.email || null,
           phone: data.phone || null,
 
-          // Attribution
+          // Attribution - USAR DATOS DE LA SESIÓN ACTUAL (donde convierte)
+          // Estos vienen de la URL con parámetros de campaña
           rstk_adid: data.ad_id || data.fbclid || data.gclid ||
-                            data.utm_campaign || data.campaign_id || null,
+                     data.campaign_id || null,
+          rstk_source: data.utm_source || data.utm_campaign ||
+                       data.site_source_name || data.ghl_source ||
+                       channel || 'Tracking',
 
           // Metadata
           source: data.ghl_source || data.utm_source || channel || 'Tracking',
