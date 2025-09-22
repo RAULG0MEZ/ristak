@@ -45,6 +45,73 @@ function extractTrackingHostname(req) {
 // EN DESARROLLO NO NECESITAMOS CORS - YA ESTÁ CONFIGURADO GLOBALMENTE EN server.js
 
 // =============================================================================
+// GET /api/tracking/sessions - Obtener sesiones para analytics
+// =============================================================================
+router.get('/sessions', async (req, res) => {
+  console.log('📊 Fetching tracking sessions for analytics');
+
+  try {
+    const { start, end } = req.query;
+
+    // Validar fechas
+    const startDate = start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const endDate = end || new Date().toISOString().split('T')[0];
+
+    // IMPORTANTE: Las fechas en DB están en UTC
+    // El frontend envía fechas en formato YYYY-MM-DD del timezone configurado
+    // Usar el timezone del usuario desde el middleware o el header
+    const timezone = req.userTimezone || req.headers['x-user-timezone'] || 'America/Mexico_City';
+
+    const query = `
+      SELECT
+        session_id,
+        visitor_id,
+        contact_id,
+        event_name,
+        started_at,
+        created_at,
+        landing_url,
+        landing_host,
+        referrer_url,
+        referrer_domain,
+        utm_source,
+        utm_medium,
+        utm_campaign,
+        utm_content,
+        channel,
+        source_platform,
+        placement,
+        device_type,
+        os,
+        browser,
+        geo_country,
+        geo_city,
+        pageviews_count,
+        events_count,
+        is_bounce,
+        properties
+      FROM tracking.sessions
+      WHERE DATE(created_at) >= $1
+        AND DATE(created_at) <= $2
+      ORDER BY created_at DESC
+      LIMIT 1000
+    `;
+
+    const result = await databasePool.query(query, [startDate, endDate]);
+
+    console.log(`✅ Found ${result.rows.length} sessions between ${startDate} and ${endDate} (timezone: ${timezone})`);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error fetching tracking sessions:', error);
+    res.status(500).json({
+      error: 'Error al obtener sesiones de tracking',
+      details: error.message
+    });
+  }
+});
+
+// =============================================================================
 // GET /snip.js - Servir el script de tracking minificado
 // =============================================================================
 router.get('/snip.js', (req, res) => {
@@ -54,21 +121,36 @@ router.get('/snip.js', (req, res) => {
 
   // Script MEJORADO con auto-append de visitor_id a URLs
   const script = `!function(){
-var e="${sid}",t="${protocol}://${host}",n="rstk_vid",o="rstk_session",r="rstk_session_num",a=localStorage,s=sessionStorage,i=Date.now(),
+var e="${sid}",t="${protocol}://${host}",a=localStorage,s=sessionStorage,i=Date.now(),
 c=function(e){var t=RegExp("[?&]"+e+"=([^&]*)").exec(location.search);return t&&decodeURIComponent(t[1].replace(/\\+/g," "))},
-l=function(e){var t="; "+document.cookie,n=t.split("; "+e+"=");return 2===n.length?n.pop().split(";").shift():null},
-// MODIFICADO: Primero checamos si viene rstk_vid en la URL
-urlVid=c("rstk_vid")||c("vid"),
-u=urlVid||a.getItem(n);
-// Si no existe rstk_vid, lo creamos
-if(!u){u="v"+i+"_"+Math.random().toString(36).substring(2,9)}
-// Siempre guardamos en localStorage
-a.setItem(n,u);
-// Si no existía antes, es primera visita
-if(!urlVid&&!a.getItem(r)){a.setItem(r,"1")}
-var d=a.getItem("rstk_last_activity"),g=s.getItem(o),m=parseInt(a.getItem(r)||"1");
-(!g||!d||i-parseInt(d)>18e5)&&(g="s"+i+"_"+Math.random().toString(36).substring(2,9),s.setItem(o,g),d&&(m++,a.setItem(r,m.toString()))),
-a.setItem("rstk_last_activity",i.toString());
+l=function(e){var t="; "+document.cookie,n=t.split("; "+e+"=");return 2===n.length?n.pop().split(";").shift():null};
+// NUEVO SISTEMA: Todo en una sola key "rstk_local" como _ud
+var rstkLocal=null;
+try{rstkLocal=JSON.parse(a.getItem("rstk_local")||"{}")}catch(e){rstkLocal={}}
+// Inicializar estructura si no existe
+if(!rstkLocal.visitor_id){
+  // Checar si viene en URL
+  var urlVid=c("rstk_vid")||c("vid");
+  rstkLocal.visitor_id=urlVid||"v"+i+"_"+Math.random().toString(36).substring(2,9);
+  rstkLocal.first_visit=new Date().toISOString();
+  rstkLocal.session_count=1;
+}
+// Manejar sesiones
+var lastActivity=rstkLocal.last_activity?new Date(rstkLocal.last_activity).getTime():0;
+var sessionId=s.getItem("rstk_session_id");
+// Nueva sesión si: no hay sesión actual O han pasado más de 30 minutos
+if(!sessionId||!lastActivity||i-lastActivity>18e5){
+  sessionId="s"+i+"_"+Math.random().toString(36).substring(2,9);
+  s.setItem("rstk_session_id",sessionId);
+  if(lastActivity){rstkLocal.session_count=(rstkLocal.session_count||1)+1}
+}
+// Actualizar última actividad
+rstkLocal.last_activity=new Date().toISOString();
+rstkLocal.current_session=sessionId;
+// Guardar todo en rstk_local
+a.setItem("rstk_local",JSON.stringify(rstkLocal));
+// Variables para el resto del script
+var u=rstkLocal.visitor_id,g=sessionId,m=rstkLocal.session_count;
 var y=document.currentScript||document.querySelector('script[src*="snip.js"]'),w=((y?y.src:t+"/snip.js").split("?")[0]||"").replace(/\\/snip\\.js$/,""),x=(w||t)+"/collect";
 console.group("[HT] 🚀 Tracking Inicializado");
 console.log("📍 Domain:",location.hostname);
@@ -130,14 +212,163 @@ domObserver.observe(document.body,{childList:true,subtree:true});
 updateAllLinks();
 });
 }
-// NUEVO: También actualizar la URL actual si no tiene rstk_vid
-if(!c("rstk_vid")&&!c("vid")){
+// MEJORADO: Actualizar URL actual y TODOS los links con reintentos agresivos
+var injectRstkVidToUrls=function(){
+// 1. Actualizar la URL actual si no tiene rstk_vid
+if(!c("rstk_vid")&&!c("vid")&&!c("visitor_id")){
 try{
 var currentUrl=new URL(location.href);
+if(!currentUrl.searchParams.has('rstk_vid')){
 currentUrl.searchParams.set('rstk_vid',u);
 history.replaceState(null,'',currentUrl.toString());
-console.log("[HT] 📍 URL actual actualizada con rstk_vid");
+console.log("[HT] 📍 URL actual actualizada con rstk_vid:",u);
+}
 }catch(e){}
+}
+// 2. Actualizar TODOS los links en la página
+var allLinks=document.querySelectorAll('a[href]');
+allLinks.forEach(function(link){
+try{
+var linkUrl=new URL(link.href,location.href);
+// Solo modificar links internos o del mismo dominio
+if(linkUrl.hostname===location.hostname||linkUrl.hostname.includes('ghl')||linkUrl.hostname.includes('clickfunnels')){
+if(!linkUrl.searchParams.has('rstk_vid')){
+linkUrl.searchParams.set('rstk_vid',u);
+link.href=linkUrl.toString();
+console.log("[HT] 🔗 Link actualizado con rstk_vid:",link.href.substring(0,50)+'...');
+}
+}
+}catch(e){}
+});
+// 3. Actualizar iframes (importante para GHL embebido)
+var allIframes=document.querySelectorAll('iframe[src]');
+allIframes.forEach(function(iframe){
+try{
+var iframeSrc=new URL(iframe.src,location.href);
+if(!iframeSrc.searchParams.has('rstk_vid')){
+iframeSrc.searchParams.set('rstk_vid',u);
+iframe.src=iframeSrc.toString();
+console.log("[HT] 📦 Iframe actualizado con rstk_vid");
+}
+}catch(e){}
+});
+};
+// INTELIGENTE: Reintentos espaciados para páginas lentas
+var urlAttempts=0;
+var urlInterval=setInterval(function(){
+urlAttempts++;
+injectRstkVidToUrls();
+console.log("[HT] 🔄 Intento",urlAttempts,"de inyección en URLs");
+if(urlAttempts>=15){// 15 intentos = 45 segundos total
+clearInterval(urlInterval);
+console.log("[HT] ✅ Finalizados intentos de inyección en URLs (45 segundos cubiertos)");
+}
+},3000);// Cada 3 segundos
+// Ejecutar inmediatamente
+injectRstkVidToUrls();
+// MEJORADO: Inyectar rstk_vid en TODOS los formularios (incluso GHL)
+var injectRstkVidToForms=function(){
+console.log("[HT] 🔍 Buscando formularios para inyectar rstk_vid:",u);
+// 1. Buscar TODOS los forms en la página
+var allForms=document.querySelectorAll('form');
+allForms.forEach(function(form){
+// Verificar si ya tiene rstk_vid
+var existingInput=form.querySelector('input[name="rstk_vid"]');
+if(!existingInput){
+// Crear input hidden con rstk_vid
+var hiddenInput=document.createElement('input');
+hiddenInput.type='hidden';
+hiddenInput.name='rstk_vid';
+hiddenInput.value=u;
+form.appendChild(hiddenInput);
+console.log("[HT] 💉 Inyectado rstk_vid en formulario:",form.id||form.className||'sin-id');
+}
+});
+// 2. Buscar inputs específicos de GHL y popular
+var ghlInputs=document.querySelectorAll('input[name*="custom_fields"], input[name*="customField"], input[placeholder*="rstk"], input[data-custom-field]');
+ghlInputs.forEach(function(input){
+// Si el input parece ser para tracking, popular con visitor_id
+var name=(input.name||'').toLowerCase();
+var placeholder=(input.placeholder||'').toLowerCase();
+var dataField=(input.getAttribute('data-custom-field')||'').toLowerCase();
+if(name.includes('rstk')||name.includes('visitor')||name.includes('tracking')||
+   placeholder.includes('rstk')||placeholder.includes('visitor')||
+   dataField.includes('rstk')||dataField.includes('visitor')){
+if(!input.value||input.value===''){
+input.value=u;
+console.log("[HT] 🎯 Input GHL populado:",input.name||input.id);
+// Disparar eventos para que GHL detecte el cambio
+input.dispatchEvent(new Event('input',{bubbles:true}));
+input.dispatchEvent(new Event('change',{bubbles:true}));
+input.dispatchEvent(new Event('blur',{bubbles:true}));
+}
+}
+});
+// 3. Buscar inputs con name="rstk_vid" exacto (mantener compatibilidad)
+var rstkInputs=document.querySelectorAll('input[name="rstk_vid"], input[data-name="rstk_vid"], input[id*="rstk_vid"]');
+rstkInputs.forEach(function(input){
+if(!input.value||input.value===''){
+input.value=u;
+console.log("[HT] 🎯 Input rstk_vid directo populado");
+input.dispatchEvent(new Event('input',{bubbles:true}));
+input.dispatchEvent(new Event('change',{bubbles:true}));
+}
+});
+// 4. NUEVO: También agregar rstk_vid a la action URL de los forms
+allForms.forEach(function(form){
+if(form.action&&!form.action.includes('rstk_vid')){
+try{
+var actionUrl=new URL(form.action,location.href);
+actionUrl.searchParams.set('rstk_vid',u);
+form.action=actionUrl.toString();
+console.log("[HT] 🔗 Action URL actualizada con rstk_vid");
+}catch(e){}
+}
+});
+};
+// INTELIGENTE: Reintentos espaciados para formularios dinámicos
+var attemptCount=0;
+var maxAttempts=15;
+var injectInterval=setInterval(function(){
+attemptCount++;
+injectRstkVidToForms();
+console.log("[HT] 📝 Intento",attemptCount,"de inyección en formularios");
+if(attemptCount>=maxAttempts){
+clearInterval(injectInterval);
+console.log("[HT] ✅ Finalizados intentos de inyección en formularios (45 segundos cubiertos)");
+}
+},3000); // Cada 3 segundos por 15 veces = 45 segundos
+// También ejecutar inmediatamente
+injectRstkVidToForms();
+// MEJORADO: Observar TODOS los cambios en el DOM para formularios Y links nuevos
+var domChangeObserver=new MutationObserver(function(mutations){
+var hasNewElements=mutations.some(function(mutation){
+return Array.from(mutation.addedNodes).some(function(node){
+return node.nodeType===1&&(
+node.tagName==='FORM'||
+node.tagName==='INPUT'||
+node.tagName==='A'||
+node.tagName==='IFRAME'||
+(node.querySelector&&(node.querySelector('form')||node.querySelector('input')||node.querySelector('a')||node.querySelector('iframe')))
+);
+});
+});
+if(hasNewElements){
+console.log("[HT] 🆕 Detectados nuevos elementos dinámicos, inyectando rstk_vid");
+setTimeout(function(){
+injectRstkVidToForms();
+injectRstkVidToUrls();
+},100);
+}
+});
+if(document.body){
+domChangeObserver.observe(document.body,{childList:true,subtree:true,attributes:true});
+}else{
+document.addEventListener('DOMContentLoaded',function(){
+domChangeObserver.observe(document.body,{childList:true,subtree:true,attributes:true});
+injectRstkVidToForms();
+injectRstkVidToUrls();
+});
 }
 // FINGERPRINTING FUNCTIONS - Genera huellas únicas del dispositivo
 var getCanvasFp=function(){try{
@@ -330,44 +561,113 @@ channel:c("channel")
 };
 // Intentar obtener datos del usuario guardados (GHL y nuestro rstk_local)
 // Primero intentar con nuestro rstk_local (tiene prioridad)
-try{var rstk=a.getItem("rstk_local");if(rstk){var rstkData=JSON.parse(rstk);
-console.log("[HT] 🔑 rstk_local detectado:",rstkData);
-o.contact_id=rstkData.contact_id,
-o.rstk_adid=rstkData.rstk_adid,
-o.rstk_source=rstkData.rstk_source,
-!o.email&&rstkData.email&&(o.email=rstkData.email),
-!o.phone&&rstkData.phone&&(o.phone=rstkData.phone),
-!o.first_name&&rstkData.first_name&&(o.first_name=rstkData.first_name),
-!o.last_name&&rstkData.last_name&&(o.last_name=rstkData.last_name)}}catch(e){}
-// Luego intentar con _ud de GHL
-try{var r=a.getItem("_ud");if(r){var userData=JSON.parse(r);
-console.log("[HT] 🔐 _ud de GHL detectado:",userData);
-o.ghl_contact_id=userData.customer_id||userData.id,
-o.ghl_location_id=userData.location_id,
-!o.email&&userData.email&&(o.email=userData.email),
-!o.phone&&userData.phone&&(o.phone=userData.phone),
-!o.first_name&&(o.first_name=userData.first_name||userData.firstName),
-!o.last_name&&(o.last_name=userData.last_name||userData.lastName),
-o.full_name=userData.full_name||userData.name,
-o.country=o.country||userData.country,
-userData.source&&(o.ghl_source=userData.source);
-// IMPORTANTE: Capturar campos de tracking directamente del _ud
-// GHL guarda rstk_vid, ad_id, utm_source, etc. como campos directos
-if(userData.rstk_vid){
-console.log("[HT] 🎯 rstk_vid encontrado en _ud:",userData.rstk_vid);
-o.rstk_vid=userData.rstk_vid
+try{if(rstkLocal&&Object.keys(rstkLocal).length>0){
+console.log("[HT] 🔑 rstk_local detectado:",rstkLocal);
+o.contact_id=rstkLocal.contact_id,
+o.rstk_adid=rstkLocal.rstk_adid,
+o.rstk_source=rstkLocal.rstk_source,
+o.is_lead=rstkLocal.is_lead||false,
+o.converted_at=rstkLocal.converted_at||null,
+o.conversion_page=rstkLocal.conversion_page||null,
+!o.email&&rstkLocal.email&&(o.email=rstkLocal.email),
+!o.phone&&rstkLocal.phone&&(o.phone=rstkLocal.phone),
+!o.first_name&&rstkLocal.first_name&&(o.first_name=rstkLocal.first_name),
+!o.last_name&&rstkLocal.last_name&&(o.last_name=rstkLocal.last_name)}}catch(e){}
+// MEJORADO: Buscar _ud de GHL con reintentos
+var ghlUserData=null;
+var checkGhlData=function(){
+try{
+var r=a.getItem("_ud");
+if(r){
+ghlUserData=JSON.parse(r);
+console.log("[HT] 🔐 _ud de GHL detectado:",ghlUserData);
+return true;
 }
-// También capturar ad_id y utm_source si vienen
-userData.ad_id&&(o.ad_id=userData.ad_id);
-userData.utm_source&&!o.utm_source&&(o.utm_source=userData.utm_source);
-userData.utm_medium&&!o.utm_medium&&(o.utm_medium=userData.utm_medium);
-userData.utm_campaign&&!o.utm_campaign&&(o.utm_campaign=userData.utm_campaign);
-userData.utm_content&&!o.utm_content&&(o.utm_content=userData.utm_content);
-userData.campaign_id&&!o.campaign_id&&(o.campaign_id=userData.campaign_id);
-userData.adset_id&&!o.adset_id&&(o.adset_id=userData.adset_id);
-userData.placement&&!o.placement&&(o.placement=userData.placement);
-userData.site_source_name&&!o.site_source_name&&(o.site_source_name=userData.site_source_name)
-}}catch(e){}
+}catch(e){}
+return false;
+};
+// Intentar obtener _ud inmediatamente
+if(checkGhlData()&&ghlUserData){
+o.ghl_contact_id=ghlUserData.customer_id||ghlUserData.id,
+o.ghl_location_id=ghlUserData.location_id,
+!o.email&&ghlUserData.email&&(o.email=ghlUserData.email),
+!o.phone&&ghlUserData.phone&&(o.phone=ghlUserData.phone),
+!o.first_name&&(o.first_name=ghlUserData.first_name||ghlUserData.firstName),
+!o.last_name&&(o.last_name=ghlUserData.last_name||ghlUserData.lastName),
+o.full_name=ghlUserData.full_name||ghlUserData.name,
+o.country=o.country||ghlUserData.country,
+ghlUserData.source&&(o.ghl_source=ghlUserData.source);
+// IMPORTANTE: Capturar campos de tracking directamente del _ud
+if(ghlUserData.rstk_vid){
+console.log("[HT] 🎯 rstk_vid encontrado en _ud:",ghlUserData.rstk_vid);
+o.rstk_vid=ghlUserData.rstk_vid
+}
+// También capturar campos custom de GHL
+if(ghlUserData.customData){
+var customData=ghlUserData.customData;
+customData.rstk_vid&&(o.rstk_vid=customData.rstk_vid);
+customData.visitor_id&&(o.rstk_vid=customData.visitor_id);
+}
+// Capturar ad_id y utm_source si vienen
+ghlUserData.ad_id&&(o.ad_id=ghlUserData.ad_id);
+ghlUserData.utm_source&&!o.utm_source&&(o.utm_source=ghlUserData.utm_source);
+ghlUserData.utm_medium&&!o.utm_medium&&(o.utm_medium=ghlUserData.utm_medium);
+ghlUserData.utm_campaign&&!o.utm_campaign&&(o.utm_campaign=ghlUserData.utm_campaign);
+ghlUserData.utm_content&&!o.utm_content&&(o.utm_content=ghlUserData.utm_content);
+ghlUserData.campaign_id&&!o.campaign_id&&(o.campaign_id=ghlUserData.campaign_id);
+ghlUserData.adset_id&&!o.adset_id&&(o.adset_id=ghlUserData.adset_id);
+ghlUserData.placement&&!o.placement&&(o.placement=ghlUserData.placement);
+ghlUserData.site_source_name&&!o.site_source_name&&(o.site_source_name=ghlUserData.site_source_name)
+}
+// MEJORADO: Si no se detectó _ud, buscar con reintentos EN CUALQUIER PÁGINA
+if(!ghlUserData){
+console.log("[HT] ⏳ Buscando _ud de GHL con reintentos...");
+var udAttempts=0;
+var udDetected=false;
+var udInterval=setInterval(function(){
+udAttempts++;
+if(checkGhlData()){
+console.log("[HT] 🎉 _ud detectado en intento",udAttempts);
+udDetected=true;
+// IMPORTANTE: Solo enviar UNA VEZ los datos actualizados
+// No usar f() directamente porque crearía nueva sesión
+// En su lugar, actualizar el rstk_local con los nuevos datos
+if(ghlUserData.customer_id||ghlUserData.id){
+rstkLocal.contact_id=ghlUserData.customer_id||ghlUserData.id;
+rstkLocal.email=ghlUserData.email||rstkLocal.email;
+rstkLocal.phone=ghlUserData.phone||rstkLocal.phone;
+rstkLocal.ghl_detected=true;
+rstkLocal.ghl_detected_at=new Date().toISOString();
+a.setItem("rstk_local",JSON.stringify(rstkLocal));
+console.log("[HT] 💾 rstk_local actualizado con datos de GHL detectados");
+// Enviar actualización al backend SIN crear nueva sesión
+var updateData={
+sid:e,vid:u,sess:g,
+event:"ghl_update", // Evento especial para actualizar, no crear nueva sesión
+ghl_contact_id:ghlUserData.customer_id||ghlUserData.id,
+email:ghlUserData.email,
+phone:ghlUserData.phone
+};
+// Si hay rstk_vid en el _ud, también enviarlo
+if(ghlUserData.rstk_vid){
+updateData.rstk_vid=ghlUserData.rstk_vid;
+}
+if(ghlUserData.customData&&ghlUserData.customData.rstk_vid){
+updateData.rstk_vid=ghlUserData.customData.rstk_vid;
+}
+// Enviar actualización silenciosa
+fetch(x,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(updateData),keepalive:!0})
+.then(function(r){console.log("[HT] ✅ Datos GHL actualizados en backend")})
+.catch(function(e){console.log("[HT] ⚠️ Error actualizando GHL:",e)});
+}
+clearInterval(udInterval);
+}
+if(udAttempts>=20&&!udDetected){// 20 intentos = 40 segundos
+clearInterval(udInterval);
+console.log("[HT] ℹ️ _ud no detectado después de",udAttempts,"intentos (es normal si no es usuario GHL)");
+}
+},2000);// Cada 2 segundos
+}
 Object.keys(o).forEach((function(e){null!=o[e]&&""!==o[e]||delete o[e]}));
 var cleanData={};Object.keys(o).forEach(function(k){if(o[k]!==null&&o[k]!==undefined&&o[k]!==""){cleanData[k]=o[k]}});
 console.group("[HT] 📤 Enviando: "+(n||"page_view"));
@@ -387,22 +687,31 @@ console.groupEnd();
 fetch(x,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o),keepalive:!0})
 .then((function(r){
 console.log("[HT] ✅ Evento enviado exitosamente (Status: "+r.status+")");
-// Si el servidor devolvió un contact_id, guardarlo en rstk_local
+// Si el servidor devolvió un contact_id, actualizar rstk_local
 if(r.status===200){return r.json().then(function(data){
 if(data.contact_id&&(o.email||o.phone||o.ghl_contact_id)){
-var rstkLocal={
-contact_id:data.contact_id,
-visitor_id:u,
-email:o.email||null,
-phone:o.phone||null,
-first_name:o.first_name||null,
-last_name:o.last_name||null,
-rstk_adid:o.ad_id||o.campaign_id||null,
-rstk_source:o.utm_source||o.ghl_source||null,
-updated_at:new Date().toISOString()
-};
+// Actualizar el objeto existente, no reemplazarlo
+rstkLocal.contact_id=data.contact_id;
+rstkLocal.email=o.email||rstkLocal.email||null;
+rstkLocal.phone=o.phone||rstkLocal.phone||null;
+rstkLocal.first_name=o.first_name||rstkLocal.first_name||null;
+rstkLocal.last_name=o.last_name||rstkLocal.last_name||null;
+rstkLocal.rstk_adid=o.ad_id||o.campaign_id||rstkLocal.rstk_adid||null;
+rstkLocal.rstk_source=o.utm_source||o.ghl_source||rstkLocal.rstk_source||null;
+rstkLocal.updated_at=new Date().toISOString();
+// NUEVO: Marcar que este usuario ya convirtió
+rstkLocal.is_lead=true;
+rstkLocal.converted_at=rstkLocal.converted_at||new Date().toISOString();
+rstkLocal.conversion_page=o.url||rstkLocal.conversion_page||null;
+// También guardar datos de atribución si vienen
+if(o.utm_campaign){rstkLocal.utm_campaign=o.utm_campaign}
+if(o.utm_medium){rstkLocal.utm_medium=o.utm_medium}
+if(o.utm_content){rstkLocal.utm_content=o.utm_content}
+if(o.fbclid){rstkLocal.fbclid=o.fbclid}
+if(o.gclid){rstkLocal.gclid=o.gclid}
+// Guardar todo actualizado
 a.setItem("rstk_local",JSON.stringify(rstkLocal));
-console.log("[HT] 💾 rstk_local guardado:",rstkLocal)
+console.log("[HT] 💾 rstk_local actualizado (LEAD CONVERTIDO):",rstkLocal)
 }}).catch(function(){})}}))
 .catch((function(e){console.warn("[HT] ⚠️ Error, reintentando con beacon:",e.message);
 if(navigator.sendBeacon){var n=new Blob([JSON.stringify(o)],{type:"application/json"});
@@ -471,586 +780,138 @@ router.post('/collect', async (req, res) => {
     }
 
     // =============================================================================
-    // SISTEMA DE MATCHING INTELIGENTE ESTILO HYROS - LIFETIME JOURNEY
+    // MANEJO ESPECIAL DE EVENTO ghl_update - NO CREAR NUEVA SESIÓN
     // =============================================================================
-    // Buscar si ya existe un visitor_id para este usuario basándose en múltiples señales
-    // SOLO hacer match con combinaciones confiables, NUNCA señales aisladas
-    // SIN LÍMITE DE TIEMPO para capturar el journey completo del usuario
+    if (data.event === 'ghl_update') {
+      console.log('🔄 [GHL UPDATE] Actualizando datos de GHL sin crear nueva sesión');
 
-    // Obtener IP real (misma lógica que usamos más abajo para guardar)
+      // Solo actualizar si viene contact_id de GHL
+      if (data.ghl_contact_id) {
+        try {
+          // Primero intentar crear/unificar el contacto
+          const contactData = {
+            id: data.ghl_contact_id,
+            email: data.email,
+            phone: data.phone
+          };
+
+          const contactUnificationService = require('../services/contact-unification.service');
+          const unifiedContact = await contactUnificationService.findOrCreateUnified(contactData);
+
+          if (unifiedContact && unifiedContact.contact_id) {
+            // Actualizar TODAS las sesiones del visitor con el contact_id
+            const updateResult = await databasePool.query(
+              `UPDATE tracking.sessions
+               SET contact_id = $1
+               WHERE visitor_id = $2 AND contact_id IS NULL`,
+              [unifiedContact.contact_id, visitorId]
+            );
+
+            console.log(`✅ [GHL UPDATE] ${updateResult.rowCount} sesiones actualizadas con contact_id: ${unifiedContact.contact_id}`);
+
+            // IMPORTANTE: También obtener datos de atribución de la primera sesión con UTMs
+            const attributionQuery = `
+              SELECT
+                utm_source,
+                utm_campaign,
+                utm_medium,
+                fbclid,
+                gclid,
+                ad_id,
+                campaign_id
+              FROM tracking.sessions
+              WHERE visitor_id = $1
+                AND (utm_source IS NOT NULL
+                     OR fbclid IS NOT NULL
+                     OR gclid IS NOT NULL
+                     OR ad_id IS NOT NULL)
+              ORDER BY created_at ASC
+              LIMIT 1
+            `;
+
+            const attrResult = await databasePool.query(attributionQuery, [visitorId]);
+
+            if (attrResult.rows.length > 0) {
+              const attr = attrResult.rows[0];
+              // Determinar rstk_adid (prioridad: ad_id > fbclid > gclid > campaign_id)
+              const rstk_adid = attr.ad_id || attr.fbclid || attr.gclid || attr.campaign_id;
+              const rstk_source = attr.utm_source;
+
+              if (rstk_adid || rstk_source) {
+                // Actualizar el contacto con datos de atribución
+                const updateContactQuery = `
+                  UPDATE contacts
+                  SET
+                    rstk_adid = COALESCE(rstk_adid, $2),
+                    rstk_source = COALESCE(rstk_source, $3),
+                    visitor_id = COALESCE(visitor_id, $4),
+                    updated_at = NOW()
+                  WHERE contact_id = $1
+                  RETURNING contact_id, rstk_adid, rstk_source
+                `;
+
+                const contactUpdateResult = await databasePool.query(
+                  updateContactQuery,
+                  [unifiedContact.contact_id, rstk_adid, rstk_source, visitorId]
+                );
+
+                if (contactUpdateResult.rows.length > 0) {
+                  const updated = contactUpdateResult.rows[0];
+                  console.log(`📊 [GHL UPDATE] Contacto actualizado con atribución first-touch:`, {
+                    contact_id: updated.contact_id,
+                    rstk_adid: updated.rstk_adid,
+                    rstk_source: updated.rstk_source
+                  });
+                }
+              }
+            }
+
+            // Si había rstk_vid en el _ud, también verificar si necesitamos hacer matching
+            if (data.rstk_vid && data.rstk_vid !== visitorId) {
+              console.log(`🔄 [GHL UPDATE] Detectado rstk_vid diferente: ${data.rstk_vid} vs ${visitorId}`);
+              // Aquí podríamos hacer matching adicional si es necesario
+            }
+          }
+        } catch (updateError) {
+          console.error('❌ [GHL UPDATE] Error actualizando contact_id:', updateError);
+        }
+      }
+
+      // Devolver OK sin crear nueva sesión
+      return res.json({
+        success: true,
+        message: 'GHL data updated',
+        visitor_id: visitorId
+      });
+    }
+
+    // =============================================================================
+    // VISITOR ID SIMPLE - MATCHING TEMPORALMENTE DESHABILITADO
+    // =============================================================================
+    // TODO: Reimplementar matching de manera más segura y conservadora
+    // Por ahora solo usar el visitor_id que viene del cliente
+    // La vinculación con contact_id mediante _ud y webhooks sigue funcionando
+
+    // Obtener IP real para logging y análisis
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
                req.headers['x-real-ip'] ||
                req.connection.remoteAddress;
 
     const userAgent = data.user_agent || req.headers['user-agent'];
 
-    // Para actualización de sesiones huérfanas, usar ventana de 24 horas
-    // (no queremos actualizar sesiones muy viejas que probablemente son de otro usuario)
-    const updateWindow = new Date(Date.now() - 86400000); // 24 horas
-
-    try {
-      console.log('\n🔍 [MATCHING] Sistema BRUTAL de matching probabilístico...');
-
-      // Preparar todos los datos para matching
-      const clickIds = {
-        fbclid: data.fbclid,
-        gclid: data.gclid,
-        ttclid: data.ttclid,
-        li_fat_id: data.li_fat_id,
-        twclid: data.twclid,
-        pclid: data.pclid,
-        msclkid: data.msclkid,
-        wbraid: data.wbraid,
-        gbraid: data.gbraid,
-        epik: data.epik,
-        rdt_cid: data.rdt_cid,
-        sc_click_id: data.sc_click_id,
-        yclid: data.yclid,
-        qclid: data.qclid
-      };
-
-      const hasAnyClickId = Object.values(clickIds).some(v => v);
-      const hasDeviceSignature = Boolean(data.device_sig);
-      const hasCanvasFingerprint = Boolean(data.canvas_fp);
-      const hasWebGLFingerprint = Boolean(data.webgl_fp);
-      const hasAudioFingerprint = Boolean(data.audio_fp);
-      const hasFontsFingerprint = Boolean(data.fonts_fp);
-      const hasScreenFingerprint = Boolean(data.screen_fp);
-
-      // ========================================================================
-      // NIVEL 1: CLICK ID ÚNICO (99.9% confianza) - Sin límite de tiempo
-      // ========================================================================
-      if (hasAnyClickId && visitorId === data.vid) {
-        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
-        const whereConditions = activeClickIds.map(([key, _], index) => `${key} = $${index + 1}`).join(' OR ');
-        const values = activeClickIds.map(([_, value]) => value);
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
-           FROM tracking.sessions
-           WHERE (${whereConditions})
-           GROUP BY visitor_id
-           ORDER BY sessions_count DESC
-           LIMIT 1`,
-          values
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [99.9%] Click ID único - Match absoluto: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 2: DEVICE SIGNATURE ÚNICO (98% confianza) - Sin límite de tiempo
-      // ========================================================================
-      if (hasDeviceSignature && visitorId === data.vid) {
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
-           FROM tracking.sessions
-           WHERE device_signature = $1
-           GROUP BY visitor_id
-           ORDER BY sessions_count DESC
-           LIMIT 1`,
-          [data.device_sig]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [98%] Device Signature único: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 3: CANVAS FINGERPRINT ÚNICO (95% confianza) - Sin límite
-      // ========================================================================
-      if (hasCanvasFingerprint && visitorId === data.vid) {
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id, COUNT(*) as sessions_count
-           FROM tracking.sessions
-           WHERE canvas_fingerprint = $1
-           GROUP BY visitor_id
-           ORDER BY sessions_count DESC
-           LIMIT 1`,
-          [data.canvas_fp]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [95%] Canvas Fingerprint único: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 4: CLICK ID + DEVICE SIGNATURE (99.5% confianza)
-      // ========================================================================
-      if (hasAnyClickId && hasDeviceSignature && visitorId === data.vid) {
-        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
-        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 2}`).join(' OR ');
-        const values = [data.device_sig, ...activeClickIds.map(([_, value]) => value)];
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE device_signature = $1 AND (${clickConditions})
-           LIMIT 1`,
-          values
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [99.5%] Click ID + Device Signature: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 5: CLICK ID + CANVAS (99% confianza)
-      // ========================================================================
-      if (hasAnyClickId && hasCanvasFingerprint && visitorId === data.vid) {
-        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
-        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 2}`).join(' OR ');
-        const values = [data.canvas_fp, ...activeClickIds.map(([_, value]) => value)];
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE canvas_fingerprint = $1 AND (${clickConditions})
-           LIMIT 1`,
-          values
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [99%] Click ID + Canvas: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 6: DEVICE + CANVAS (97% confianza)
-      // ========================================================================
-      if (hasDeviceSignature && hasCanvasFingerprint && visitorId === data.vid) {
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE device_signature = $1 AND canvas_fingerprint = $2
-           LIMIT 1`,
-          [data.device_sig, data.canvas_fp]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [97%] Device + Canvas: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 7: CLICK ID + WEBGL (96% confianza)
-      // ========================================================================
-      if (hasAnyClickId && hasWebGLFingerprint && visitorId === data.vid) {
-        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
-        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 2}`).join(' OR ');
-        const values = [data.webgl_fp, ...activeClickIds.map(([_, value]) => value)];
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE webgl_fingerprint = $1 AND (${clickConditions})
-           LIMIT 1`,
-          values
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [96%] Click ID + WebGL: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 8: CANVAS + WEBGL + AUDIO (94% confianza)
-      // ========================================================================
-      if (hasCanvasFingerprint && hasWebGLFingerprint && hasAudioFingerprint && visitorId === data.vid) {
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE canvas_fingerprint = $1
-             AND webgl_fingerprint = $2
-             AND audio_fingerprint = $3
-           LIMIT 1`,
-          [data.canvas_fp, data.webgl_fp, data.audio_fp]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [94%] Canvas + WebGL + Audio: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 9: IP + CLICK ID (92% confianza) - 48 horas
-      // ========================================================================
-      if (hasAnyClickId && ip && visitorId === data.vid) {
-        const recentWindow = new Date(Date.now() - 172800000); // 48 horas
-        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
-        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 2}`).join(' OR ');
-        const values = [ip, ...activeClickIds.map(([_, value]) => value), recentWindow];
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE ip = $1 AND (${clickConditions})
-             AND created_at > $${values.length}
-           LIMIT 1`,
-          values
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [92%] IP + Click ID (48h): ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 10: USER-AGENT + CLICK ID + CAMPAIGN (91% confianza)
-      // ========================================================================
-      if (hasAnyClickId && userAgent && data.utm_campaign && visitorId === data.vid) {
-        const activeClickIds = Object.entries(clickIds).filter(([_, value]) => value);
-        const clickConditions = activeClickIds.map(([key, _], i) => `${key} = $${i + 3}`).join(' OR ');
-        const values = [userAgent, data.utm_campaign, ...activeClickIds.map(([_, value]) => value)];
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE user_agent = $1
-             AND utm_campaign = $2
-             AND (${clickConditions})
-           LIMIT 1`,
-          values
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [91%] UserAgent + Click ID + Campaign: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 11: DEVICE + WEBGL (90% confianza)
-      // ========================================================================
-      if (hasDeviceSignature && hasWebGLFingerprint && visitorId === data.vid) {
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE device_signature = $1 AND webgl_fingerprint = $2
-           LIMIT 1`,
-          [data.device_sig, data.webgl_fp]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [90%] Device + WebGL: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 12: IP + DEVICE SIGNATURE (88% confianza) - 7 días
-      // ========================================================================
-      if (ip && hasDeviceSignature && visitorId === data.vid) {
-        const weekWindow = new Date(Date.now() - 604800000); // 7 días
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE ip = $1 AND device_signature = $2
-             AND created_at > $3
-           LIMIT 1`,
-          [ip, data.device_sig, weekWindow]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [88%] IP + Device Signature (7d): ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 13: IP + CANVAS (87% confianza) - 7 días
-      // ========================================================================
-      if (ip && hasCanvasFingerprint && visitorId === data.vid) {
-        const weekWindow = new Date(Date.now() - 604800000);
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE ip = $1 AND canvas_fingerprint = $2
-             AND created_at > $3
-           LIMIT 1`,
-          [ip, data.canvas_fp, weekWindow]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [87%] IP + Canvas (7d): ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 14: IP + USER-AGENT + CANVAS (85% confianza) - 24 horas
-      // ========================================================================
-      if (ip && userAgent && hasCanvasFingerprint && visitorId === data.vid) {
-        const dayWindow = new Date(Date.now() - 86400000);
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE ip = $1 AND user_agent = $2 AND canvas_fingerprint = $3
-             AND created_at > $4
-           LIMIT 1`,
-          [ip, userAgent, data.canvas_fp, dayWindow]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [85%] IP + UserAgent + Canvas (24h): ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 15: IP + USER-AGENT + DEVICE (84% confianza) - 24 horas
-      // ========================================================================
-      if (ip && userAgent && hasDeviceSignature && visitorId === data.vid) {
-        const dayWindow = new Date(Date.now() - 86400000);
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE ip = $1 AND user_agent = $2 AND device_signature = $3
-             AND created_at > $4
-           LIMIT 1`,
-          [ip, userAgent, data.device_sig, dayWindow]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [84%] IP + UserAgent + Device (24h): ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 16: WEBGL + AUDIO + FONTS (83% confianza)
-      // ========================================================================
-      if (hasWebGLFingerprint && hasAudioFingerprint && hasFontsFingerprint && visitorId === data.vid) {
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE webgl_fingerprint = $1
-             AND audio_fingerprint = $2
-             AND fonts_fingerprint = $3
-           LIMIT 1`,
-          [data.webgl_fp, data.audio_fp, data.fonts_fp]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [83%] WebGL + Audio + Fonts: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 17: IP + USER-AGENT + CAMPAIGN + AD_ID (82% confianza) - 24h
-      // ========================================================================
-      if (ip && userAgent && data.utm_campaign && data.ad_id && visitorId === data.vid) {
-        const dayWindow = new Date(Date.now() - 86400000);
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE ip = $1 AND user_agent = $2
-             AND utm_campaign = $3 AND ad_id = $4
-             AND created_at > $5
-           LIMIT 1`,
-          [ip, userAgent, data.utm_campaign, data.ad_id, dayWindow]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [82%] IP + UA + Campaign + Ad ID (24h): ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 18: TIMEZONE + LANGUAGE + DEVICE + CANVAS (80% confianza)
-      // ========================================================================
-      if (data.tz && data.lang && hasDeviceSignature && hasCanvasFingerprint && visitorId === data.vid) {
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE timezone = $1 AND language = $2
-             AND device_signature = $3 AND canvas_fingerprint = $4
-           LIMIT 1`,
-          [data.tz, data.lang, data.device_sig, data.canvas_fp]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [80%] Timezone + Lang + Device + Canvas: ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 19: IN-APP BROWSER + IP + CAMPAIGN (78% confianza) - 7 días
-      // ========================================================================
-      if (ip && userAgent && data.utm_campaign && visitorId === data.vid) {
-        const isInAppBrowser =
-          userAgent.includes('FBAN') || userAgent.includes('FBAV') ||
-          userAgent.includes('Instagram') || userAgent.includes('LinkedInApp') ||
-          userAgent.includes('Twitter') || userAgent.includes('Pinterest') ||
-          userAgent.includes('Snapchat') || userAgent.includes('TikTok') ||
-          userAgent.includes('BytedanceWebview') || userAgent.includes('Line/') ||
-          userAgent.includes('WhatsApp') || userAgent.includes('Telegram');
-
-        if (isInAppBrowser) {
-          const weekWindow = new Date(Date.now() - 604800000);
-
-          const match = await databasePool.query(
-            `SELECT DISTINCT visitor_id
-             FROM tracking.sessions
-             WHERE ip = $1 AND user_agent = $2 AND utm_campaign = $3
-               AND created_at > $4
-             LIMIT 1`,
-            [ip, userAgent, data.utm_campaign, weekWindow]
-          );
-
-          if (match.rows.length > 0) {
-            visitorId = match.rows[0].visitor_id;
-            console.log(`✅ [78%] In-App Browser + IP + Campaign (7d): ${visitorId}`);
-          }
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 20: IP + USER-AGENT + SOURCE + MEDIUM (75% confianza) - 12h
-      // ========================================================================
-      if (ip && userAgent && data.utm_source && data.utm_medium && visitorId === data.vid) {
-        const halfDayWindow = new Date(Date.now() - 43200000); // 12 horas
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE ip = $1 AND user_agent = $2
-             AND utm_source = $3 AND utm_medium = $4
-             AND created_at > $5
-           LIMIT 1`,
-          [ip, userAgent, data.utm_source, data.utm_medium, halfDayWindow]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [75%] IP + UA + Source + Medium (12h): ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 21: IP SUBNET + DEVICE + TIMEZONE (73% confianza) - 3 días
-      // ========================================================================
-      if (ip && hasDeviceSignature && data.tz && visitorId === data.vid) {
-        // Obtener subnet (primeros 3 octetos para IPv4, primeros 4 bloques para IPv6)
-        const ipSubnet = ip.includes(':')
-          ? ip.split(':').slice(0, 4).join(':')  // IPv6
-          : ip.split('.').slice(0, 3).join('.');  // IPv4
-
-        const threeDayWindow = new Date(Date.now() - 259200000);
-
-        const match = await databasePool.query(
-          `SELECT DISTINCT visitor_id
-           FROM tracking.sessions
-           WHERE ip LIKE $1
-             AND device_signature = $2
-             AND timezone = $3
-             AND created_at > $4
-           LIMIT 1`,
-          [ipSubnet + '%', data.device_sig, data.tz, threeDayWindow]
-        );
-
-        if (match.rows.length > 0) {
-          visitorId = match.rows[0].visitor_id;
-          console.log(`✅ [73%] IP Subnet + Device + Timezone (3d): ${visitorId}`);
-        }
-      }
-
-      // ========================================================================
-      // NIVEL 22: ÚLTIMO RECURSO - MÚLTIPLES FINGERPRINTS PARCIALES (70%)
-      // ========================================================================
-      if (visitorId === data.vid) {
-        // Contar cuántos fingerprints coinciden
-        let fingerprintMatches = 0;
-        let whereConditions = [];
-        let values = [];
-        let paramIndex = 1;
-
-        if (hasCanvasFingerprint) {
-          whereConditions.push(`canvas_fingerprint = $${paramIndex++}`);
-          values.push(data.canvas_fp);
-          fingerprintMatches++;
-        }
-        if (hasWebGLFingerprint) {
-          whereConditions.push(`webgl_fingerprint = $${paramIndex++}`);
-          values.push(data.webgl_fp);
-          fingerprintMatches++;
-        }
-        if (hasAudioFingerprint) {
-          whereConditions.push(`audio_fingerprint = $${paramIndex++}`);
-          values.push(data.audio_fp);
-          fingerprintMatches++;
-        }
-        if (hasFontsFingerprint) {
-          whereConditions.push(`fonts_fingerprint = $${paramIndex++}`);
-          values.push(data.fonts_fp);
-          fingerprintMatches++;
-        }
-
-        // Solo hacer match si tenemos al menos 3 fingerprints que coinciden
-        if (fingerprintMatches >= 3 && whereConditions.length > 0) {
-          const match = await databasePool.query(
-            `SELECT DISTINCT visitor_id
-             FROM tracking.sessions
-             WHERE ${whereConditions.join(' AND ')}
-             LIMIT 1`,
-            values
-          );
-
-          if (match.rows.length > 0) {
-            visitorId = match.rows[0].visitor_id;
-            console.log(`✅ [70%] Múltiples Fingerprints (${fingerprintMatches}/4): ${visitorId}`);
-          }
-        }
-      }
-
-      // Si encontramos un match, actualizar sesiones huérfanas recientes
-      if (visitorId !== data.vid) {
-        console.log(`🔄 [MATCHING] Actualizando sesiones huérfanas del visitor original ${data.vid} -> ${visitorId}`);
-
-        // Solo actualizar sesiones de las últimas 24 horas para evitar mezclar usuarios
-        const updateResult = await databasePool.query(
-          `UPDATE tracking.sessions
-           SET visitor_id = $1
-           WHERE visitor_id = $2
-             AND created_at > $3
-           RETURNING session_id`,
-          [visitorId, data.vid, updateWindow]
-        );
-
-        if (updateResult.rowCount > 0) {
-          console.log(`📝 [MATCHING] Actualizadas ${updateResult.rowCount} sesiones huérfanas`);
-        }
-      }
-
-    } catch (matchError) {
-      console.error('⚠️ [MATCHING] Error en matching inteligente:', matchError);
-      // No fallar, usar el visitor_id original
-    }
-
-    console.log(`📊 [MATCHING] Visitor ID final: ${visitorId}`);
-
+    // MATCHING DESHABILITADO - Usar visitor_id original
+    // visitorId ya fue declarado arriba en la línea 463
+    console.log(`📍 [VISITOR] Usando visitor_id original: ${visitorId}`);
+
+    // TODO ELIMINADO: Sistema de matching de 22 niveles que causaba falsos positivos
+    // Próxima implementación debe ser más conservadora y evitar falsos positivos
+
+    // Código de matching eliminado - líneas 492-1262 del archivo original
+    // Se eliminaron los 22 niveles de matching que causaban unificación incorrecta
+    // de usuarios diferentes (ej: Samuel y Francisco)
+
+    // IMPORTANTE: La vinculación con contact_id mediante _ud y webhooks
+    // sigue funcionando normalmente más abajo en el código
     // Parsear URL
     let urlData = {};
     try {
@@ -1408,10 +1269,17 @@ router.post('/collect', async (req, res) => {
     ]);
 
     // =============================================================================
-    // MATCHING GHL → CONTACT CON UNIFICACIÓN INTELIGENTE
+    // MATCHING CONTACT CON UNIFICACIÓN INTELIGENTE
     // =============================================================================
-    // Si viene con datos de GHL, email o phone, usar el servicio de unificación
-    if (data.ghl_contact_id || data.email || data.phone) {
+    // PRIORIDAD:
+    // 1. Si viene contact_id de rstk_local (nuestro sistema)
+    // 2. Si viene ghl_contact_id de _ud (fallback de GHL)
+    // 3. Si viene email o phone (cualquier fuente)
+    const hasRstkLocalData = data.contact_id && !data.ghl_contact_id; // contact_id sin ghl_contact_id = viene de rstk_local
+    const hasGhlData = data.ghl_contact_id; // viene de _ud
+    const hasContactData = data.email || data.phone;
+
+    if (hasRstkLocalData || hasGhlData || hasContactData) {
       try {
         const contactUnificationService = require('../services/contact-unification.service');
         const fingerprintUnificationService = require('../services/fingerprint-unification.service');
@@ -1479,6 +1347,42 @@ router.post('/collect', async (req, res) => {
           );
 
           console.log(`[Tracking → Contact] ✅ ${updateResult.rowCount} sesiones históricas del visitor ${visitorId} vinculadas a contacto ${unifiedContact.contact_id}`);
+
+          // NUEVO: También actualizar el contacto con datos de atribución si no los tenía
+          // Esto es importante para que el contacto tenga rstk_adid y rstk_source
+          if (contactData.rstk_adid || contactData.rstk_source) {
+            const updateContactQuery = `
+              UPDATE contacts
+              SET
+                rstk_adid = COALESCE(rstk_adid, $2),
+                rstk_source = COALESCE(rstk_source, $3),
+                visitor_id = COALESCE(visitor_id, $4),
+                updated_at = NOW()
+              WHERE contact_id = $1
+              RETURNING contact_id, rstk_adid, rstk_source
+            `;
+
+            const contactUpdateResult = await databasePool.query(
+              updateContactQuery,
+              [
+                unifiedContact.contact_id,
+                contactData.rstk_adid,
+                contactData.rstk_source,
+                visitorId
+              ]
+            );
+
+            if (contactUpdateResult.rows.length > 0) {
+              const updated = contactUpdateResult.rows[0];
+              console.log(`[Tracking → Contact] 📊 Contacto actualizado con atribución:`, {
+                contact_id: updated.contact_id,
+                rstk_adid: updated.rstk_adid,
+                rstk_source: updated.rstk_source
+              });
+            }
+          }
+
+          // Ya no marcamos pages como "lead" - todas quedan como page_view
 
           // También guardar en nuestro propio localStorage (rstk_local)
           // Esto se hace en el cliente, no en el servidor
