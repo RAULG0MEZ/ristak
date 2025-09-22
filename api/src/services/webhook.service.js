@@ -165,13 +165,21 @@ class WebhookService {
   
   // Mapeo flexible para pagos
   async processPayment(data) {
-    // Campos requeridos - usar nombres exactos del webhook
-    const requiredFields = ['transaction_id', 'monto', 'contact_id'];
+    // EXTRAER DATOS DEL CUSTOMDATA PRIMERO para validación
+    const customData = data.customData || {};
+
+    // Campos requeridos - verificar tanto en customData como en raíz
+    const requiredFields = [
+      { name: 'transaction_id', getValue: () => customData.transaction_id || data.transaction_id },
+      { name: 'monto', getValue: () => customData.monto || data.monto },
+      { name: 'contact_id', getValue: () => customData.contact_id || data.contact_id }
+    ];
+
     const missingFields = [];
 
     for (const field of requiredFields) {
-      if (!data[field]) {
-        missingFields.push(field);
+      if (!field.getValue()) {
+        missingFields.push(field.name);
       }
     }
 
@@ -181,12 +189,12 @@ class WebhookService {
       throw error;
     }
 
-    // EXTRAER DATOS DEL CUSTOMDATA PRIMERO, LUEGO FALLBACK A NIVEL RAÍZ
-    const customData = data.customData || {};
-
     // DEBUG: Mostrar customData recibido en pagos
     if (customData && Object.keys(customData).length > 0) {
       console.log('[Webhook Payment] CustomData recibido:', JSON.stringify(customData));
+      console.log('[Webhook Payment] transaction_id extraído:', customData.transaction_id || data.transaction_id);
+      console.log('[Webhook Payment] monto extraído:', customData.monto || data.monto);
+      console.log('[Webhook Payment] contact_id extraído:', customData.contact_id || data.contact_id);
     }
 
     // NUEVO: Si viene rstk_vid, loguear para tracking
@@ -196,14 +204,15 @@ class WebhookService {
     }
 
     // Mapear campos del webhook a campos de la BD
+    // PRIORIZAR customData, luego fallback a campos en raíz
     const paymentData = {
-      transaction_id: data.transaction_id,
-      amount: parseFloat(data.monto) || 0, // Mapear "monto" a "amount"
-      description: data.nota || null, // Mapear "nota" a "description"
-      contact_id: data.contact_id,
-      currency: data.currency || 'MXN',
+      transaction_id: customData.transaction_id || data.transaction_id,
+      amount: parseFloat(customData.monto || data.monto) || 0, // Mapear "monto" a "amount"
+      description: customData.nota || data.nota || null, // Mapear "nota" a "description"
+      contact_id: customData.contact_id || data.contact_id,
+      currency: customData.currency || data.currency || 'MXN',
       status: 'completed',
-      payment_method: data.payment_method || 'unknown',
+      payment_method: customData.payment_method || data.payment_method || 'unknown',
       // Usar ISO string para garantizar UTC
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -239,9 +248,9 @@ class WebhookService {
       const payment = result.rows[0];
 
       // NUEVO: Si hay rstk_vid, vincular con las sesiones de tracking
-      if (data.rstk_vid && payment.contact_id) {
+      if (visitorId && payment.contact_id) {
         try {
-          console.log(`[Webhook Payment → Tracking] Vinculando visitor_id ${data.rstk_vid} con contact_id ${payment.contact_id}`);
+          console.log(`[Webhook Payment → Tracking] Vinculando visitor_id ${visitorId} con contact_id ${payment.contact_id}`);
 
           // Actualizar TODAS las sesiones que tengan este visitor_id
           const updateResult = await databasePool.query(
@@ -251,7 +260,7 @@ class WebhookService {
                  revenue_value = revenue_value + $2,
                  last_order_id = $3
              WHERE visitor_id = $4`,
-            [payment.contact_id, payment.amount, payment.transaction_id, data.rstk_vid]
+            [payment.contact_id, payment.amount, payment.transaction_id, visitorId]
           );
 
           console.log(`[Webhook Payment → Tracking] ${updateResult.rowCount} sesiones actualizadas con información de pago`);
