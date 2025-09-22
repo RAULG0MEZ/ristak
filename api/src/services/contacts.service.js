@@ -1,4 +1,5 @@
 const { databasePool } = require('../config/database.config');
+const { adjustDateRange } = require('../utils/date-helper');
 const crypto = require('crypto');
 
 class ContactsService {
@@ -36,6 +37,10 @@ class ContactsService {
   
   async getContacts(startDate, endDate, filters = {}) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       let query = `
         SELECT 
           c.contact_id,
@@ -45,6 +50,7 @@ class ContactsService {
           c.phone,
           c.company,
           c.rstk_adid,
+          c.visitor_id,
           c.ext_crm_id,
           c.status,
           c.source,
@@ -70,6 +76,7 @@ class ContactsService {
         phone: row.phone,
         company: row.company,
         attributionAdId: row.rstk_adid,
+        visitorId: row.visitor_id,
         ghlId: row.ext_crm_id,
         status: row.payment_count > 0 ? 'client' : row.appointment_count > 0 ? 'appointment' : 'lead',
         source: row.source || 'Direct',
@@ -142,6 +149,7 @@ class ContactsService {
         company: newContact.company,
         status: newContact.status,
         source: newContact.source,
+        visitorId: newContact.visitor_id,
         createdAt: newContact.created_at,
         updatedAt: newContact.updated_at
       };
@@ -227,6 +235,7 @@ class ContactsService {
         company: updatedContact.company,
         status: updatedContact.status,
         source: updatedContact.source,
+        visitorId: updatedContact.visitor_id,
         createdAt: updatedContact.created_at,
         updatedAt: updatedContact.updated_at
       };
@@ -294,6 +303,18 @@ class ContactsService {
 
   async getContactMetrics(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
+
+      // Calcular período anterior para trends
+      const periodLength = (endDate - startDate) / (1000 * 60 * 60 * 24);
+      const previousEndDate = new Date(startDate);
+      previousEndDate.setDate(previousEndDate.getDate() - 1);
+      const previousStartDate = new Date(previousEndDate);
+      previousStartDate.setDate(previousStartDate.getDate() - periodLength);
+
       // Total contacts
       const totalQuery = `
         SELECT COUNT(*) as total
@@ -327,25 +348,53 @@ class ContactsService {
         )
       `;
 
+      // Ejecutar queries para período actual
       const [total, appointments, customers] = await Promise.all([
         databasePool.query(totalQuery, [startDate, endDate]),
         databasePool.query(appointmentsQuery, [startDate, endDate]),
         databasePool.query(customersQuery, [startDate, endDate])
       ]);
 
+      // Ejecutar queries para período anterior
+      const [prevTotal, prevAppointments, prevCustomers] = await Promise.all([
+        databasePool.query(totalQuery, [previousStartDate, previousEndDate]),
+        databasePool.query(appointmentsQuery, [previousStartDate, previousEndDate]),
+        databasePool.query(customersQuery, [previousStartDate, previousEndDate])
+      ]);
+
       const totalContacts = parseInt(total.rows[0].total) || 0;
       const withAppointments = parseInt(appointments.rows[0].with_appointments) || 0;
       const customerCount = parseInt(customers.rows[0].customers) || 0;
       const totalLTV = parseFloat(customers.rows[0].total_ltv) || 0;
+      const avgLTV = customerCount > 0 ? totalLTV / customerCount : 0;
+
+      const prevTotalContacts = parseInt(prevTotal.rows[0].total) || 0;
+      const prevWithAppointments = parseInt(prevAppointments.rows[0].with_appointments) || 0;
+      const prevCustomerCount = parseInt(prevCustomers.rows[0].customers) || 0;
+      const prevTotalLTV = parseFloat(prevCustomers.rows[0].total_ltv) || 0;
+      const prevAvgLTV = prevCustomerCount > 0 ? prevTotalLTV / prevCustomerCount : 0;
+
+      // Función para calcular trends
+      const calculateTrend = (current, previous) => {
+        if (previous === 0) return current > 0 ? 100 : 0;
+        return ((current - previous) / Math.abs(previous)) * 100;
+      };
 
       return {
         total: totalContacts,
         withAppointments: withAppointments,
         customers: customerCount,
         totalLTV: totalLTV,
-        avgLTV: customerCount > 0 ? totalLTV / customerCount : 0,
+        avgLTV: avgLTV,
         conversionRate: totalContacts > 0 ? (customerCount / totalContacts) * 100 : 0,
-        appointmentRate: totalContacts > 0 ? (withAppointments / totalContacts) * 100 : 0
+        appointmentRate: totalContacts > 0 ? (withAppointments / totalContacts) * 100 : 0,
+        trends: {
+          total: calculateTrend(totalContacts, prevTotalContacts),
+          withAppointments: calculateTrend(withAppointments, prevWithAppointments),
+          customers: calculateTrend(customerCount, prevCustomerCount),
+          totalLTV: calculateTrend(totalLTV, prevTotalLTV),
+          avgLTV: calculateTrend(avgLTV, prevAvgLTV)
+        }
       };
     } catch (error) {
       console.error('Error fetching contact metrics:', error);
@@ -367,6 +416,7 @@ class ContactsService {
           c.phone,
           c.company,
           c.rstk_adid,
+          c.visitor_id,
           c.ext_crm_id,
           c.status,
           c.source,
@@ -394,6 +444,7 @@ class ContactsService {
         phone: row.phone,
         company: row.company,
         attributionAdId: row.rstk_adid,
+        visitorId: row.visitor_id,
         ghlId: row.ext_crm_id,
         status: row.payment_count > 0 ? 'client' : row.appointment_count > 0 ? 'appointment' : 'lead',
         source: row.source || 'Direct',
@@ -417,6 +468,10 @@ class ContactsService {
   // Nuevo método para obtener contactos con paginación Y filtro de fecha
   async getContactsWithPagination(startDate, endDate, offset, limit) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const countQuery = `
         SELECT COUNT(*) as total
         FROM contacts
@@ -432,6 +487,7 @@ class ContactsService {
           c.phone,
           c.company,
           c.rstk_adid,
+          c.visitor_id,
           c.ext_crm_id,
           c.status,
           c.source,
@@ -460,6 +516,7 @@ class ContactsService {
         phone: row.phone,
         company: row.company,
         attributionAdId: row.rstk_adid,
+        visitorId: row.visitor_id,
         ghlId: row.ext_crm_id,
         status: row.payment_count > 0 ? 'client' : row.appointment_count > 0 ? 'appointment' : 'lead',
         source: row.source || 'Direct',

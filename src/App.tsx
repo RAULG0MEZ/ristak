@@ -18,6 +18,7 @@ import { Reports } from './pages/Reports'
 import { Settings } from './pages/Settings'
 import { DataImport } from './pages/DataImport'
 import { Login } from './pages/Login'
+import { Analytics } from './pages/Analytics'
 
 function RootLayout() {
   const { deployStatus, deployMessage, deployLogs, showToast, hideToast } = useDeployment()
@@ -64,6 +65,7 @@ function App() {
                   <Route path="contacts" element={<Contacts />} />
                   <Route path="payments" element={<Payments />} />
                   <Route path="reports" element={<Reports />} />
+                  <Route path="analytics" element={<Analytics />} />
                   <Route path="settings" element={<Settings />} />
                   <Route path="import" element={<DataImport />} />
                 </Route>

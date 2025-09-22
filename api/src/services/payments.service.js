@@ -1,5 +1,6 @@
 const { databasePool } = require('../config/database.config');
 const crypto = require('crypto');
+const { adjustDateRange } = require('../utils/date-helper');
 
 class PaymentsService {
 
@@ -43,6 +44,10 @@ class PaymentsService {
   
   async getPayments(startDate, endDate, filters = {}) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       let query = `
         SELECT 
           p.id,
@@ -361,6 +366,18 @@ class PaymentsService {
   
   async getPaymentMetrics(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
+
+      // Calcular período anterior para trends
+      const periodLength = (endDate - startDate) / (1000 * 60 * 60 * 24);
+      const previousEndDate = new Date(startDate);
+      previousEndDate.setDate(previousEndDate.getDate() - 1);
+      const previousStartDate = new Date(previousEndDate);
+      previousStartDate.setDate(previousStartDate.getDate() - periodLength);
+
       // Completed payments
       const completedQuery = `
         SELECT
@@ -403,13 +420,21 @@ class PaymentsService {
         AND status = 'completed'
       `;
 
+      // Ejecutar queries para período actual
       const [completed, refunded, pending, incomeExpense] = await Promise.all([
         databasePool.query(completedQuery, [startDate, endDate]),
         databasePool.query(refundedQuery, [startDate, endDate]),
         databasePool.query(pendingQuery, [startDate, endDate]),
         databasePool.query(incomeExpenseQuery, [startDate, endDate])
       ]);
-      
+
+      // Ejecutar queries para período anterior
+      const [prevCompleted, prevRefunded, prevIncomeExpense] = await Promise.all([
+        databasePool.query(completedQuery, [previousStartDate, previousEndDate]),
+        databasePool.query(refundedQuery, [previousStartDate, previousEndDate]),
+        databasePool.query(incomeExpenseQuery, [previousStartDate, previousEndDate])
+      ]);
+
       const completedCount = parseInt(completed.rows[0].count) || 0;
       const completedTotal = parseFloat(completed.rows[0].total) || 0;
       const refundedCount = parseInt(refunded.rows[0].count) || 0;
@@ -419,7 +444,22 @@ class PaymentsService {
       const income = parseFloat(incomeExpense.rows[0].income) || 0;
       const expenses = parseFloat(incomeExpense.rows[0].expenses) || 0;
       const incomeCount = parseInt(incomeExpense.rows[0].income_count) || 0;
-      
+      const netRevenue = income - refundedTotal;
+      const avgPayment = incomeCount > 0 ? income / incomeCount : 0;
+
+      const prevCompletedCount = parseInt(prevCompleted.rows[0].count) || 0;
+      const prevIncome = parseFloat(prevIncomeExpense.rows[0].income) || 0;
+      const prevRefundedTotal = parseFloat(prevRefunded.rows[0].total) || 0;
+      const prevIncomeCount = parseInt(prevIncomeExpense.rows[0].income_count) || 0;
+      const prevNetRevenue = prevIncome - prevRefundedTotal;
+      const prevAvgPayment = prevIncomeCount > 0 ? prevIncome / prevIncomeCount : 0;
+
+      // Función para calcular trends
+      const calculateTrend = (current, previous) => {
+        if (previous === 0) return current > 0 ? 100 : 0;
+        return ((current - previous) / Math.abs(previous)) * 100;
+      };
+
       return {
         completed: {
           count: completedCount,
@@ -433,12 +473,18 @@ class PaymentsService {
           count: pendingCount,
           total: pendingTotal
         },
-        netRevenue: income - refundedTotal,
+        netRevenue: netRevenue,
         totalRevenue: income,
         totalExpenses: expenses,
-        avgPayment: incomeCount > 0 ? income / incomeCount : 0,
-        successRate: (completedCount + refundedCount + pendingCount) > 0 ? 
-          (completedCount / (completedCount + refundedCount + pendingCount)) * 100 : 0
+        avgPayment: avgPayment,
+        successRate: (completedCount + refundedCount + pendingCount) > 0 ?
+          (completedCount / (completedCount + refundedCount + pendingCount)) * 100 : 0,
+        trends: {
+          netRevenue: calculateTrend(netRevenue, prevNetRevenue),
+          avgPayment: calculateTrend(avgPayment, prevAvgPayment),
+          completedCount: calculateTrend(completedCount, prevCompletedCount),
+          refunds: calculateTrend(refundedTotal, prevRefundedTotal)
+        }
       };
     } catch (error) {
       console.error('Error fetching payment metrics:', error);
@@ -514,6 +560,10 @@ class PaymentsService {
   // Nuevo método para obtener pagos con paginación Y filtro de fecha
   async getPaymentsWithPagination(startDate, endDate, offset, limit) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const countQuery = `
         SELECT COUNT(*) as total
         FROM payments

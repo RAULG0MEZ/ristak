@@ -332,6 +332,8 @@ export function Contacts() {
           <KPICard
             title="Total Contactos"
             value={formatNumber(metrics?.total || 0)}
+            change={metrics?.trends?.total || 0}
+            trend={metrics?.trends?.total > 0 ? 'up' : metrics?.trends?.total < 0 ? 'down' : undefined}
             subtitle={`Periodo actual`}
             icon={Icons.users}
             iconColor="text-primary"
@@ -341,6 +343,8 @@ export function Contacts() {
           <KPICard
             title="Con Citas"
             value={formatNumber(metrics?.withAppointments || 0)}
+            change={metrics?.trends?.withAppointments || 0}
+            trend={metrics?.trends?.withAppointments > 0 ? 'up' : metrics?.trends?.withAppointments < 0 ? 'down' : undefined}
             subtitle={`Del total: ${metrics?.appointmentRate.toFixed(1) || 0}%`}
             icon={Icons.calendar}
             iconColor="text-primary"
@@ -350,6 +354,8 @@ export function Contacts() {
           <KPICard
             title="Clientes"
             value={formatNumber(metrics?.customers || 0)}
+            change={metrics?.trends?.customers || 0}
+            trend={metrics?.trends?.customers > 0 ? 'up' : metrics?.trends?.customers < 0 ? 'down' : undefined}
             subtitle={`Conversión: ${metrics?.conversionRate.toFixed(1) || 0}%`}
             icon={Icons.userPlus}
             iconColor="text-primary"
@@ -373,6 +379,8 @@ export function Contacts() {
           <KPICard
             title="LTV Promedio"
             value={formatCurrency(metrics?.avgLTV || 0)}
+            change={metrics?.trends?.avgLTV || 0}
+            trend={metrics?.trends?.avgLTV > 0 ? 'up' : metrics?.trends?.avgLTV < 0 ? 'down' : undefined}
             subtitle={`Por cliente`}
             icon={Icons.trendingUp}
             iconColor="text-primary"

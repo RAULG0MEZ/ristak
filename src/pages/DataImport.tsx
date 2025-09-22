@@ -88,30 +88,26 @@ export function DataImport() {
         <KPICard
           title="Total Importaciones"
           value={importStats.totalImports.toString()}
-          change="+3 este mes"
+          subtitle="+3 este mes"
           icon={<Icons.fileText className="w-5 h-5" />}
-          trend="up"
         />
         <KPICard
           title="Registros Totales"
           value={importStats.totalRecords.toLocaleString()}
-          change="+1,250 últimos"
+          subtitle="+1,250 últimos"
           icon={<Icons.database className="w-5 h-5" />}
-          trend="up"
         />
         <KPICard
           title="Tasa de Éxito"
           value={`${importStats.successRate}%`}
-          change="Sin errores críticos"
+          subtitle="Sin errores críticos"
           icon={<Icons.checkCircle className="w-5 h-5" />}
-          trend="neutral"
         />
         <KPICard
           title="Última Importación"
           value={importStats.lastImport}
-          change="Hace 2 días"
+          subtitle="Hace 2 días"
           icon={<Icons.calendar className="w-5 h-5" />}
-          trend="neutral"
         />
       </div>
 

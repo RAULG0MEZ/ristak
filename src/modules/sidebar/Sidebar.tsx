@@ -8,6 +8,7 @@ import { useDeployment } from '../../contexts/DeploymentContext'
 const navigation = [
   { name: 'Dashboard', href: '/', icon: Icons.dashboard },
   { name: 'Reportes', href: '/reports', icon: Icons.reports },
+  { name: 'Analíticas', href: '/analytics', icon: Icons.trendingUp },
   { name: 'Campañas', href: '/campaigns', icon: Icons.campaigns },
   { name: 'Pagos', href: '/payments', icon: Icons.dollar },
   { name: 'Contactos', href: '/contacts', icon: Icons.users },
@@ -29,8 +30,8 @@ export function Sidebar() {
   
   return (
     <div className="flex flex-col h-full">
-      {/* Logo alineado con el header */}
-      <div className="flex items-center justify-center h-[73px] border-b border-primary px-4">
+      {/* Logo - alineación exacta con el header */}
+      <div className="flex items-center justify-center px-4 h-[84px] border-b border-primary">
         <Logo size="2xl" />
       </div>
 

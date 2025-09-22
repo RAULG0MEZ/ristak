@@ -28,6 +28,8 @@ import {
   Inbox,
   Home,
   Plus,
+  MapPin,
+  Move,
   Minus,
   DollarSign,
   Users,
@@ -73,7 +75,15 @@ import {
   Receipt,
   AlertTriangle,
   Lock,
-  Compass
+  Compass,
+  UserCheck,
+  Flame,
+  Smartphone,
+  BarChart2,
+  Instagram,
+  Monitor,
+  Tablet,
+  HelpCircle
 } from 'lucide-react'
 import { Meta } from '@lobehub/icons'
 import { useEffect, useState } from 'react'
@@ -178,6 +188,7 @@ export const Icons = {
   facebook: Facebook,
   meta: MetaIcon,
   google: Chrome,
+  chrome: Chrome,
   copy: Copy,
   lock: Lock,
   link: Link,
@@ -203,10 +214,20 @@ export const Icons = {
   phone: Phone,
   building: Building,
   receipt: Receipt,
-  info: Info,
   inbox: Inbox,
   creditCard: CreditCard,
   compass: Compass,
+  userCheck: UserCheck,
+  flame: Flame,
+  edge: Compass,
+  smartphone: Smartphone,
+  barChart2: BarChart2,
+  instagram: Instagram,
+  monitor: Monitor,
+  tablet: Tablet,
+  mapPin: MapPin,
+  move: Move,
+  helpCircle: HelpCircle,
 }
 
 export type IconName = keyof typeof Icons

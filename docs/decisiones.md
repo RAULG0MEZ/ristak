@@ -5,6 +5,12 @@
 
 ## 🚀 Decisiones de Funcionalidad y UX
 
+### 2025-09-22 - Eliminar detección por event_name='lead'
+- **Decisión**: Remover toda la lógica de detección por marcado de leads
+- **Motivo**: Simplificar el sistema usando solo el método de proximidad temporal
+- **Archivos modificados**: `/src/pages/Analytics.tsx`
+- **Beneficio**: Código más simple y consistente sin múltiples métodos de detección
+
 ### 2025-09-20 - Sistema Global de Timezone para toda la aplicación
 - **Decisión**: Implementar sistema completo de timezone donde TODO se guarda en UTC en DB
 - **Problema resuelto**: Las importaciones CSV usaban timezone del navegador, causando inconsistencias
@@ -50,9 +56,53 @@
 - **Cambios realizados**:
   - Frontend: Todo usa `/src/lib/dateUtils.ts` (dateToApiString, formatDateShort, formatDateLong, etc.)
   - Backend: Mantiene consistencia con `/api/src/utils/date-utils.js`
-  - Migrados: Campaigns, Payments, Reports, Settings, TrackingSection y todos los hooks principales
+  - Migrados: Campaigns, Payments, Reports, Settings, TrackingSection, Analytics y todos los hooks principales
 - **Beneficio**: Consistencia total en fechas, menos bugs de timezone, una sola fuente de verdad
 - **Documentación**: Creada guía completa en `/docs/Manejo-Fechas.md`
+
+### 2025-01-21 - Unificación de formato de fechas en Analytics
+- **Decisión**: Reemplazar `toLocaleDateString` por `formatDate` en la página de Analytics
+- **Problema detectado**: Analytics era la única página que no usaba las funciones de formateo del sistema
+- **Motivo**: Inconsistencias visuales y de timezone entre Analytics y el resto de la aplicación
+- **Cambios realizados**:
+  - Importado `formatDate` desde `../lib/utils` en Analytics.tsx
+  - Reemplazadas todas las instancias de `toLocaleDateString('es-ES', dateFormat)` por `formatDate(date, dateFormat)`
+  - Reemplazadas todas las instancias de `toLocaleDateString('es-ES', { month: 'short' })` por `formatDate(date, { month: 'short' })`
+- **Beneficio**: Consistencia total en formato de fechas y respeto al timezone configurado por el usuario
+
+### 2025-01-21 - Simplificación de lógica de registros en Analytics
+- **Decisión**: Eliminar toda la lógica compleja de atribución y sesiones para registros
+- **Problema detectado**: La lógica de atribución last-touch era demasiado compleja y no funcionaba correctamente
+- **Motivo**: Los registros no aparecían porque la validación de sesiones era muy estricta
+- **Cambios realizados**:
+  - Eliminadas funciones: `computeContactAttribution`, `buildContactMetadata`, `normalizeContactId`, `extractVisitorId`
+  - Simplificado cálculo de registros: solo cuenta contactos creados en el período (`contactsResponse.length`)
+  - Eliminada validación de sesiones previas y tolerancia temporal
+  - Limpiado código no utilizado y funciones obsoletas
+- **Beneficio**: Los registros ahora aparecen correctamente y el código es más simple y mantenible
+
+### 2025-01-21 - Corrección de lógica de opt-ins en Analytics
+- **Decisión**: Contar solo contactos que aparecen en AMBOS (creados Y en tracking sessions)
+- **Problema detectado**: La lógica anterior contaba todos los contactos creados, no solo los opt-ins reales
+- **Motivo**: Necesitamos ver cuántos opt-ins se hicieron realmente, no solo contactos creados
+- **Cambios realizados**:
+  - Lógica de intersección: solo contactos que aparecen en `contacts` Y `tracking_sessions`
+  - Evitar duplicados: usar `Set` para garantizar conteo único por contacto
+  - Aplicado en: tarjeta de registros, gráfico de registros, y cálculos de tendencias
+  - Debug mejorado: muestra total de contactos, contactos en sessions, y opt-ins reales
+- **Beneficio**: Los registros ahora muestran opt-ins reales, no solo contactos creados
+
+### 2025-09-21 - Columnas de tasas de conversión en tabla de campañas
+- **Decisión**: Agregar columnas ocultas de tasas de conversión en la tabla de campañas
+- **Motivo**: Permitir análisis detallado del embudo de conversión sin saturar la vista por defecto
+- **Implementación**:
+  - Web→Leads %: Visitantes que se convierten en leads (visitors → leads)
+  - Leads→Citas %: Leads que agendan citas (leads → appointments)
+  - Citas→Ventas %: Citas que se convierten en ventas (appointments → sales)
+  - Columnas ocultas por defecto, accesibles desde configuración de columnas
+  - Cálculos tanto en frontend como backend para consistencia
+- **Archivos modificados**: `src/pages/Campaigns.tsx`, `api/src/services/campaigns.service.js`
+- **Beneficio**: Visibilidad profunda del embudo sin sobrecargar la interfaz principal
 
 ### 2025-09-19 - Modal de contactos únicos en tabla de campañas
 - **Decisión**: Implementar modal reutilizable para ver contactos únicos de cada métrica
@@ -206,5 +256,28 @@
   - Cada fila = un evento/pageview con su session_id para agrupar
   - El nombre "sessions" es confuso pero funciona correctamente
 
+### 2025-01-21 - Mejora agresiva de inyección de rstk_vid en formularios GHL
+- **Problema detectado**: El rstk_vid no llegaba a los formularios de GHL, causando que contactos no se vincularan con visitor_id
+- **Causa raíz**: GHL usa campos custom dinámicos que no se llaman exactamente "rstk_vid"
+- **Solución implementada**:
+  - Inyección automática de input hidden `rstk_vid` en TODOS los formularios de la página
+  - Búsqueda inteligente de inputs GHL con patterns como "custom_fields", "customField", etc.
+  - Re-intentos cada segundo por 10 segundos para capturar formularios cargados con AJAX
+  - Actualización de action URL de formularios para incluir rstk_vid como parámetro
+  - Detección mejorada de `_ud` con reintentos en páginas de confirmación
+- **Archivos modificados**:
+  - `/api/src/routes/tracking.routes.js` - función `injectRstkVidToForms()` más agresiva
+- **Beneficio**: Mayor probabilidad de captura del visitor_id en formularios dinámicos
+
+### 2025-01-21 - Sistema de fallback temporal para matching visitor-contact
+- **Problema identificado**: Cuando `_ud` no se detecta a tiempo, contactos quedan sin visitor_id
+- **Diseño (NO implementado)**: Sistema de matching probabilístico por proximidad temporal
+- **Concepto**: Vincular visitors con contacts basado en:
+  - Ventanas de tiempo (5 seg a 15 min)
+  - Señales contextuales (UTMs, IPs, device fingerprint)
+  - Niveles de confianza (PERFECT, HIGH, MEDIUM, LOW)
+- **Documentación**: `/docs/TEMPORAL_MATCHING_SYSTEM.md`
+- **Estado**: DISEÑADO pero NO IMPLEMENTADO - requiere testing extensivo
+
 ---
-*Última actualización: 2025-01-19*
+*Última actualización: 2025-01-21*

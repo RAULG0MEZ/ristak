@@ -31,6 +31,7 @@ export function KPICard({
         <div className="flex-1 min-w-0">
           <p className="text-xs text-tertiary mb-1">{title}</p>
           <p className="text-2xl font-bold text-primary truncate">{value}</p>
+          {/* Mostrar siempre el porcentaje vs anterior cuando está disponible */}
           {change !== undefined && (
             <div className={cn('text-xs mt-1', trendColor)}>
               <span>{change > 0 ? '+' : ''}{change.toFixed(1)}%</span>

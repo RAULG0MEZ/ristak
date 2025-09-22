@@ -276,6 +276,8 @@ export function Payments() {
           <KPICard
             title="Pagos Completados"
             value={formatNumber(metrics?.completed.count || 0)}
+            change={metrics?.trends?.completedCount || 0}
+            trend={metrics?.trends?.completedCount > 0 ? 'up' : metrics?.trends?.completedCount < 0 ? 'down' : undefined}
             subtitle={`Total: ${formatCurrency(metrics?.completed.total || 0)}`}
             icon={Icons.checkCircle}
             iconColor="text-primary"
@@ -299,6 +301,8 @@ export function Payments() {
           <KPICard
             title="Reembolsos"
             value={formatCurrency(metrics?.refunded.total || 0)}
+            change={metrics?.trends?.refunds || 0}
+            trend={metrics?.trends?.refunds < 0 ? 'up' : metrics?.trends?.refunds > 0 ? 'down' : undefined}
             subtitle={`Transacciones: ${formatNumber(metrics?.refunded.count || 0)}`}
             icon={Icons.xCircle}
             iconColor="text-primary"

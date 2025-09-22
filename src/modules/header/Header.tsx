@@ -34,13 +34,19 @@ export function Header() {
   return (
     <header className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-primary">
       <div className="flex items-center gap-2 sm:gap-4 flex-1 max-w-xl ml-12 lg:ml-0">
-        <div className="relative flex-1">
-          <Icons.search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-secondary" />
+        <div className="flex items-center gap-2 flex-1">
           <input
             type="text"
             placeholder="Buscar"
-            className="w-full pl-10 pr-3 sm:pr-4 py-2 glass border border-primary rounded-xl text-primary placeholder:text-tertiary focus-ring-accent transition-colors text-sm sm:text-base"
+            className="flex-1 px-3 sm:px-4 py-2 glass border border-primary rounded-xl text-primary placeholder:text-tertiary focus-ring-accent transition-colors text-sm sm:text-base"
           />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="p-2 glass border border-primary rounded-xl hover:glass-hover"
+          >
+            <Icons.send className="w-4 h-4 text-primary" />
+          </Button>
         </div>
       </div>
 

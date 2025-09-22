@@ -556,6 +556,52 @@ export function Reports() {
       render: (value: any) => (
         <span className="text-secondary">{value ? formatCurrency(value) : '—'}</span>
       )
+    },
+    {
+      id: 'visitors',
+      label: 'Visitantes Web',
+      align: 'right' as const,
+      visible: false,
+      render: (value: any) => (
+        <span className="text-secondary">{formatNumber(value)}</span>
+      )
+    },
+    // Columnas de tasas de conversión (ocultas por defecto)
+    {
+      id: 'webToLeadsRate',
+      label: 'Web→Leads %',
+      align: 'right' as const,
+      visible: false,
+      render: (_: any, row: any) => {
+        const rate = row.visitors > 0 ? (row.leads / row.visitors) * 100 : 0
+        return (
+          <span>{rate.toFixed(1)}%</span>
+        )
+      }
+    },
+    {
+      id: 'leadsToApptsRate',
+      label: 'Leads→Citas %',
+      align: 'right' as const,
+      visible: false,
+      render: (_: any, row: any) => {
+        const rate = row.leads > 0 ? (row.appointments / row.leads) * 100 : 0
+        return (
+          <span>{rate.toFixed(1)}%</span>
+        )
+      }
+    },
+    {
+      id: 'apptsToSalesRate',
+      label: 'Citas→Ventas %',
+      align: 'right' as const,
+      visible: false,
+      render: (_: any, row: any) => {
+        const rate = row.appointments > 0 ? (row.sales / row.appointments) * 100 : 0
+        return (
+          <span>{rate.toFixed(1)}%</span>
+        )
+      }
     }
   ], [viewType, reportType]) // Solo viewType y reportType como dependencias
 

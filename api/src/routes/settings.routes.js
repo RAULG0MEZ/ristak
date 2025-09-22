@@ -78,30 +78,6 @@ router.get('/', async (req, res) => {
       });
     }
 
-    // En desarrollo, devolver settings por defecto
-    if (process.env.NODE_ENV !== 'production' && userId === 'dev-user') {
-      // Cargar preferencias guardadas en localStorage del navegador si existen
-      const devSettings = buildSettingsResponse({
-        name: 'Desarrollo',
-        email: 'dev@ristak.local',
-        timezone: 'America/Mexico_City',
-        currency: 'MXN',
-        settings: {
-          account_name: 'Desarrollo Local',
-          user_name: 'Usuario Dev',
-          user_email: 'dev@ristak.local',
-          user_business_name: 'Ristak Dev',
-          user_ui_preferences: {
-            tables: {}
-          }
-        }
-      });
-
-      return res.json({
-        success: true,
-        data: devSettings
-      });
-    }
 
     const result = await databasePool.query(
       'SELECT name, email, timezone, currency, settings FROM users WHERE id = $1 LIMIT 1',
@@ -240,13 +216,6 @@ router.get('/preferences', async (req, res) => {
       });
     }
 
-    // En desarrollo, devolver preferencias vacías
-    if (process.env.NODE_ENV !== 'production' && userId === 'dev-user') {
-      return res.json({
-        success: true,
-        data: {}
-      });
-    }
 
     const result = await databasePool.query(
       'SELECT table_preferences FROM users WHERE id = $1 LIMIT 1',
@@ -287,16 +256,6 @@ router.put('/preferences/:tableName', async (req, res) => {
     const { tableName } = req.params;
     const preferences = req.body || {};
 
-    // En desarrollo, simular guardado exitoso sin tocar la DB
-    if (process.env.NODE_ENV !== 'production' && userId === 'dev-user') {
-      console.log('[Settings Dev] Guardando preferencias de tabla:', tableName, preferences);
-      return res.json({
-        success: true,
-        data: {
-          [tableName]: preferences
-        }
-      });
-    }
 
     // Obtener las preferencias actuales de la nueva columna table_preferences
     const result = await databasePool.query(

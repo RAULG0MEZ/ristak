@@ -27,9 +27,9 @@ const devAuth = (req, res, next) => {
     return next();
   }
 
-  // En desarrollo, crear usuario automático
+  // En desarrollo, usar el usuario real de desarrollo (ID 3)
   req.user = {
-    userId: 'dev-user',
+    userId: 3,
     email: 'dev@ristak.local',
     role: 'admin'
   };
@@ -50,7 +50,7 @@ app.set('trust proxy', true);
 const cors = (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept, x-user-timezone');
 
   // Manejar preflight
   if (req.method === 'OPTIONS') {

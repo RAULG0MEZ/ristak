@@ -1,8 +1,13 @@
 const { databasePool } = require('../config/database.config');
 const { checkMetaAdsTableExists, queryMetaAdsIfExists } = require('../utils/meta-helper');
+const { adjustDateRange } = require('../utils/date-helper');
 
 class ReportsService {
   async getMetrics(startDate, endDate, groupBy = 'month') {
+    // Ajustar fechas para incluir todo el día
+    const adjusted = adjustDateRange(startDate, endDate);
+    startDate = adjusted.startDate;
+    endDate = adjusted.endDate;
     // PESTAÑA "TODOS": Datos reales de actividad en el período seleccionado
     // Sin filtros de atribución - incluye TODOS los contactos
     const unit = ['day', 'month', 'year'].includes(groupBy) ? groupBy : 'month'
@@ -43,11 +48,16 @@ class ReportsService {
       // Parallel queries by source
       const [ads, sessions, contacts, appointments, payments, newCustomers] = await Promise.all([
         adsPromise,
-        // Visitors - TRACKING NO IMPLEMENTADO AÚN
-        // Por ahora retornamos 0 visitantes hasta implementar tracking
+        // Visitantes únicos desde tracking.sessions
         databasePool.query(
-          `SELECT DATE_TRUNC($1, NOW()) AS period, 0 AS visitors`,
-          [unit]
+          `SELECT DATE_TRUNC($3, started_at) AS period,
+                  COUNT(DISTINCT visitor_id) AS visitors
+           FROM tracking.sessions
+           WHERE started_at >= $1 AND started_at <= $2
+             AND visitor_id IS NOT NULL
+           GROUP BY period
+           ORDER BY period`,
+          [startDate, endDate, unit]
         ),
         // TODOS los contactos creados en el período (sin importar rstk_adid)
         databasePool.query(
@@ -196,6 +206,10 @@ class ReportsService {
   }
 
   async getAttributedMetrics(startDate, endDate, groupBy = 'month') {
+    // Ajustar fechas para incluir todo el día
+    const adjusted = adjustDateRange(startDate, endDate);
+    startDate = adjusted.startDate;
+    endDate = adjusted.endDate;
     // PESTAÑA "ATRIBUIDOS": Solo contactos con rstk_adid
     // Usa Last Attribution - TODO se basa en la fecha de creación del contacto
     const unit = ['day', 'month', 'year'].includes(groupBy) ? groupBy : 'month'
@@ -216,12 +230,16 @@ class ReportsService {
            ORDER BY period`,
           [startDate, endDate, unit]
         ),
-        // Visitantes totales (sin filtro de atribución)
-        // Visitors - TRACKING NO IMPLEMENTADO AÚN
-        // Por ahora retornamos 0 visitantes hasta implementar tracking
+        // Visitantes únicos desde tracking.sessions (sin filtro de atribución)
         databasePool.query(
-          `SELECT DATE_TRUNC($1, NOW()) AS period, 0 AS visitors`,
-          [unit]
+          `SELECT DATE_TRUNC($3, started_at) AS period,
+                  COUNT(DISTINCT visitor_id) AS visitors
+           FROM tracking.sessions
+           WHERE started_at >= $1 AND started_at <= $2
+             AND visitor_id IS NOT NULL
+           GROUP BY period
+           ORDER BY period`,
+          [startDate, endDate, unit]
         ),
         // Solo contactos con rstk_adid Y que coincidan con anuncio activo
         databasePool.query(
@@ -437,6 +455,10 @@ class ReportsService {
   // Obtener ventas detalladas (TODOS) - Agrupado por cliente con total acumulado
   async getSalesDetails(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const result = await databasePool.query(`
         WITH client_sales AS (
           SELECT
@@ -496,6 +518,10 @@ class ReportsService {
   // Obtener ventas atribuidas (SOLO CON rstk_adid) - Total lifetime value
   async getSalesDetailsAttributed(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const result = await databasePool.query(`
         WITH attributed_clients AS (
           -- Primero identificar clientes atribuidos creados en el período
@@ -574,6 +600,10 @@ class ReportsService {
   // Obtener leads detallados (TODOS)
   async getLeadsDetails(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const result = await databasePool.query(`
         SELECT
           contact_id,
@@ -599,6 +629,10 @@ class ReportsService {
   // Obtener leads atribuidos (SOLO CON rstk_adid)
   async getLeadsDetailsAttributed(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const result = await databasePool.query(`
         SELECT
           c.contact_id,
@@ -637,6 +671,10 @@ class ReportsService {
   // Obtener citas detalladas (TODOS)
   async getAppointmentsDetails(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const result = await databasePool.query(`
         SELECT
           a.id,
@@ -678,6 +716,10 @@ class ReportsService {
   // Obtener citas atribuidas (usando fecha de creación del CONTACTO para Last Attribution)
   async getAppointmentsDetailsAttributed(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const result = await databasePool.query(`
         SELECT
           a.id,
@@ -732,6 +774,10 @@ class ReportsService {
   // Obtener clientes nuevos (TODOS) - con primer pago en el período
   async getNewCustomersDetails(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const result = await databasePool.query(`
         WITH first_payments AS (
           SELECT
@@ -778,6 +824,10 @@ class ReportsService {
   // Obtener clientes nuevos atribuidos - contactos con rstk_adid creados en el período QUE TIENEN PAGOS
   async getNewCustomersDetailsAttributed(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const result = await databasePool.query(`
         WITH attributed_customers AS (
           SELECT
@@ -836,6 +886,10 @@ class ReportsService {
   // Summary metrics for reports with trends
   async getReportsMetrics(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      const adjustedStartDate = adjusted.startDate;
+      const adjustedEndDate = adjusted.endDate;
       // Calculate the previous period for comparison
       const periodLength = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
       const previousEndDate = new Date(startDate);

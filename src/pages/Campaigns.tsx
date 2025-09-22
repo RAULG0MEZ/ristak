@@ -626,6 +626,34 @@ export function Campaigns() {
       render: (value: any) => (
         <span>{value.toFixed(2)}x</span>
       )
+    },
+    // Columnas de tasas de conversión (ocultas por defecto)
+    {
+      id: 'webToLeadsRate',
+      label: 'Web→Leads %',
+      align: 'right' as const,
+      visible: false, // Oculta por defecto
+      render: (value: any) => (
+        <span>{value.toFixed(1)}%</span>
+      )
+    },
+    {
+      id: 'leadsToApptsRate',
+      label: 'Leads→Citas %',
+      align: 'right' as const,
+      visible: false, // Oculta por defecto
+      render: (value: any) => (
+        <span>{value.toFixed(1)}%</span>
+      )
+    },
+    {
+      id: 'apptsToSalesRate',
+      label: 'Citas→Ventas %',
+      align: 'right' as const,
+      visible: false, // Oculta por defecto
+      render: (value: any) => (
+        <span>{value.toFixed(1)}%</span>
+      )
     }
   ] // Sin useMemo para evitar closures viejos
 
@@ -780,7 +808,11 @@ export function Campaigns() {
           sales: campaign.sales,
           cac: campaign.cac,
           revenue: campaign.revenue,
-          roas: campaign.roas
+          roas: campaign.roas,
+          // Tasas de conversión calculadas
+          webToLeadsRate: campaign.visitors > 0 ? (campaign.leads / campaign.visitors) * 100 : 0,
+          leadsToApptsRate: campaign.leads > 0 ? (campaign.appointments / campaign.leads) * 100 : 0,
+          apptsToSalesRate: campaign.appointments > 0 ? (campaign.sales / campaign.appointments) * 100 : 0
         },
         children: campaign.adSets.map(adSet => {
           const adSetId = normalizeId(adSet.adSetId) ?? ''
@@ -802,7 +834,11 @@ export function Campaigns() {
               sales: adSet.sales,
               cac: adSet.cac,
               revenue: adSet.revenue,
-              roas: adSet.roas
+              roas: adSet.roas,
+              // Tasas de conversión calculadas
+              webToLeadsRate: adSet.visitors > 0 ? (adSet.leads / adSet.visitors) * 100 : 0,
+              leadsToApptsRate: adSet.leads > 0 ? (adSet.appointments / adSet.leads) * 100 : 0,
+              apptsToSalesRate: adSet.appointments > 0 ? (adSet.sales / adSet.appointments) * 100 : 0
             },
             children: adSet.ads.map(ad => {
               const adId = normalizeId(ad.adId) ?? ''
@@ -824,7 +860,11 @@ export function Campaigns() {
                   sales: ad.sales,
                   cac: ad.cac,
                   revenue: ad.revenue,
-                  roas: ad.roas
+                  roas: ad.roas,
+                  // Tasas de conversión calculadas
+                  webToLeadsRate: ad.visitors > 0 ? (ad.leads / ad.visitors) * 100 : 0,
+                  leadsToApptsRate: ad.leads > 0 ? (ad.appointments / ad.leads) * 100 : 0,
+                  apptsToSalesRate: ad.appointments > 0 ? (ad.sales / ad.appointments) * 100 : 0
                 }
               }
             })
@@ -1582,13 +1622,11 @@ export function Campaigns() {
 
                             {/* Info del visitante */}
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-primary truncate">
-                                {visitor.contact?.name || `Visitante ${visitor.visitorId.substring(0, 8)}`}
+                              <p className="text-sm font-medium text-primary">
+                                {visitor.contact?.name || 'Visitante Anónimo'}
                               </p>
-                              <p className="text-xs text-secondary truncate">
-                                {visitor.hasContact && visitor.contact?.name ?
-                                  `ID: ${visitor.visitorId.substring(0, 8)}...` :
-                                  'Visitante anónimo'}
+                              <p className="text-xs text-secondary break-all">
+                                ID: {visitor.visitorId}
                               </p>
                             </div>
 
@@ -1726,24 +1764,55 @@ export function Campaigns() {
                                 Dispositivo y Ubicación
                               </h5>
                               <div className="grid grid-cols-2 gap-3">
+                                {/* Ubicación con manejo de valores vacíos */}
                                 {selectedVisitor.location && (
                                   <div className="glass rounded-lg p-3">
                                     <p className="text-xs text-tertiary mb-1">Ubicación</p>
                                     <p className="text-sm font-medium text-primary">
-                                      {selectedVisitor.location.city && `${selectedVisitor.location.city}, `}
-                                      {selectedVisitor.location.country}
+                                      {(() => {
+                                        // Si es via proxy de Facebook, mostrar solo eso
+                                        if (selectedVisitor.location.country === 'Via Facebook/Proxy') {
+                                          return 'Via Facebook/Proxy';
+                                        }
+                                        // Si hay ciudad, mostrarla con país
+                                        if (selectedVisitor.location.city && selectedVisitor.location.city !== 'No disponible') {
+                                          return `${selectedVisitor.location.city}, ${selectedVisitor.location.country || 'No disponible'}`;
+                                        }
+                                        // Si solo hay país
+                                        return selectedVisitor.location.country || 'No disponible';
+                                      })()}
                                     </p>
+                                    {/* Región si existe */}
+                                    {selectedVisitor.location.region && selectedVisitor.location.country !== 'Via Facebook/Proxy' && (
+                                      <p className="text-xs text-secondary">
+                                        Región: {selectedVisitor.location.region}
+                                      </p>
+                                    )}
+                                    {/* IP siempre visible pero con break-all para que no se salga */}
+                                    {selectedVisitor.ip && (
+                                      <p className="text-xs text-secondary mt-1 break-all">
+                                        IP: {selectedVisitor.ip}
+                                      </p>
+                                    )}
                                   </div>
                                 )}
+                                {/* Dispositivo con valores mejorados */}
                                 {selectedVisitor.device && (
                                   <div className="glass rounded-lg p-3">
                                     <p className="text-xs text-tertiary mb-1">Dispositivo</p>
-                                    <p className="text-sm font-medium text-primary capitalize">
-                                      {selectedVisitor.device.type}
+                                    <p className="text-sm font-medium text-primary">
+                                      {selectedVisitor.device.type !== 'No identificado'
+                                        ? selectedVisitor.device.type
+                                        : 'Dispositivo no identificado'}
                                     </p>
-                                    {selectedVisitor.device.browser && (
-                                      <p className="text-xs text-secondary capitalize">
+                                    {selectedVisitor.device.browser && selectedVisitor.device.browser !== 'No identificado' && (
+                                      <p className="text-xs text-secondary">
                                         {selectedVisitor.device.browser}
+                                      </p>
+                                    )}
+                                    {selectedVisitor.device.os && selectedVisitor.device.os !== 'No identificado' && (
+                                      <p className="text-xs text-secondary">
+                                        {selectedVisitor.device.os}
                                       </p>
                                     )}
                                   </div>

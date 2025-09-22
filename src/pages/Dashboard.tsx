@@ -24,7 +24,7 @@ export function Dashboard() {
     end: dateRange.end
   })
   
-  // Usar datos reales si están disponibles, si no, usar valores por defecto
+  // Usar datos reales del hook - solo valores por defecto para loading
   const defaultFinancialMetrics = [
     { label: 'Ingresos Netos', value: formatCurrency(0), change: 0, trend: 'neutral' as const },
     { label: 'Gastos de Publicidad', value: formatCurrency(0), change: 0, trend: 'neutral' as const },
@@ -38,9 +38,10 @@ export function Dashboard() {
     { label: 'Reembolsos', value: formatCurrency(0), change: 0, trend: 'neutral' as const },
     { label: 'LTV Promedio', value: formatCurrency(0), change: 0, trend: 'neutral' as const },
   ]
-  
-  const displayFinancialMetrics = loading ? defaultFinancialMetrics : (financialMetrics.length > 0 ? financialMetrics : defaultFinancialMetrics)
-  const displayObligationsMetrics = loading ? defaultObligationsMetrics : (obligationsMetrics.length > 0 ? obligationsMetrics : defaultObligationsMetrics)
+
+  // Usar métricas reales del hook cuando estén disponibles, defaults solo para loading
+  const displayFinancialMetrics = loading ? defaultFinancialMetrics : financialMetrics
+  const displayObligationsMetrics = loading ? defaultObligationsMetrics : obligationsMetrics
 
   return (
     <PageContainer>
@@ -70,7 +71,7 @@ export function Dashboard() {
                 title={metric.label}
                 value={metric.value}
                 change={metric.change}
-                trend={metric.trend}
+                trend={metric.trend === 'neutral' ? undefined : metric.trend}
                 icon={icons[index]}
                 iconColor={iconColors[index]}
                 className={loading ? 'animate-pulse' : ''}
@@ -91,7 +92,7 @@ export function Dashboard() {
                 title={metric.label}
                 value={metric.value}
                 change={metric.change}
-                trend={metric.trend}
+                trend={metric.trend === 'neutral' ? undefined : metric.trend}
                 icon={icons[index]}
                 iconColor={iconColors[index]}
                 className={loading ? 'animate-pulse' : ''}

@@ -48,6 +48,7 @@ export interface Contact {
   campaignId?: string
   adId?: string
   createdAt: string
+  visitorId?: string
   lastContact?: string
   company?: string
   attributionAdId?: string

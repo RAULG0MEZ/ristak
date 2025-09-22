@@ -56,8 +56,12 @@ export function getAuthHeaders(): HeadersInit {
 
 // Función helper para hacer fetch con headers de autenticación
 export async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
+  // Obtener timezone configurado del localStorage o usar default
+  const userTimezone = localStorage.getItem('user_timezone') || 'America/Mexico_City';
+
   const headers = {
     ...getAuthHeaders(),
+    'x-user-timezone': userTimezone,
     ...(options.headers || {})
   }
 

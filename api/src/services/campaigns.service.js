@@ -1,5 +1,7 @@
 const { databasePool } = require('../config/database.config');
 const { checkMetaAdsTableExists } = require('../utils/meta-helper');
+const { adjustDateRange } = require('../utils/date-helper');
+const { getGeoFromIP } = require('../utils/geo-helper');
 
 const META_SOURCE_KEYWORDS = [
   'facebook',
@@ -22,6 +24,10 @@ const META_SOURCE_PATTERNS = META_SOURCE_KEYWORDS.map(keyword => `%${keyword}%`)
 class CampaignsService {
   async getCampaignsMetrics(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       const hasAdsTable = await checkMetaAdsTableExists();
 
       if (!hasAdsTable) {
@@ -280,6 +286,10 @@ class CampaignsService {
 
   async getHierarchy(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       // Check if Meta ads table exists
       const hasAdsTable = await checkMetaAdsTableExists();
 
@@ -601,7 +611,11 @@ class CampaignsService {
           sales: salesData.sales,
           cac: salesData.sales > 0 ? parseFloat(spend) / salesData.sales : null,
           revenue: salesData.revenue,
-          roas: parseFloat(spend) > 0 ? salesData.revenue / parseFloat(spend) : 0
+          roas: parseFloat(spend) > 0 ? salesData.revenue / parseFloat(spend) : 0,
+          // Tasas de conversión calculadas
+          webToLeadsRate: visitors > 0 ? (leads / visitors) * 100 : 0,
+          leadsToApptsRate: leads > 0 ? (appointments / leads) * 100 : 0,
+          apptsToSalesRate: appointments > 0 ? (salesData.sales / appointments) * 100 : 0
         })
       }
 
@@ -622,6 +636,10 @@ class CampaignsService {
           adSet.cac = adSet.sales > 0 ? adSet.spend / adSet.sales : null
           adSet.revenue = adSet.ads.reduce((sum, ad) => sum + ad.revenue, 0)
           adSet.roas = adSet.spend > 0 ? adSet.revenue / adSet.spend : 0
+          // Tasas de conversión para AdSet
+          adSet.webToLeadsRate = adSet.visitors > 0 ? (adSet.leads / adSet.visitors) * 100 : 0
+          adSet.leadsToApptsRate = adSet.leads > 0 ? (adSet.appointments / adSet.leads) * 100 : 0
+          adSet.apptsToSalesRate = adSet.appointments > 0 ? (adSet.sales / adSet.appointments) * 100 : 0
         })
 
         campaign.spend = campaign.adSets.reduce((sum, as) => sum + as.spend, 0)
@@ -637,6 +655,10 @@ class CampaignsService {
         campaign.cac = campaign.sales > 0 ? campaign.spend / campaign.sales : null
         campaign.revenue = campaign.adSets.reduce((sum, as) => sum + as.revenue, 0)
         campaign.roas = campaign.spend > 0 ? campaign.revenue / campaign.spend : 0
+        // Tasas de conversión para Campaign
+        campaign.webToLeadsRate = campaign.visitors > 0 ? (campaign.leads / campaign.visitors) * 100 : 0
+        campaign.leadsToApptsRate = campaign.leads > 0 ? (campaign.appointments / campaign.leads) * 100 : 0
+        campaign.apptsToSalesRate = campaign.appointments > 0 ? (campaign.sales / campaign.appointments) * 100 : 0
       })
 
       console.log(`[Campaigns] Encontradas ${campaigns.length} campañas`);
@@ -650,6 +672,10 @@ class CampaignsService {
 
   async getMetrics(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       console.log('[Campaigns] Obteniendo métricas en modo single-tenant');
 
       const result = await databasePool.query(
@@ -950,6 +976,10 @@ class CampaignsService {
 
   async getHistoricalData(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día
+      const adjusted = adjustDateRange(startDate, endDate);
+      startDate = adjusted.startDate;
+      endDate = adjusted.endDate;
       // Generar datos diarios para el gráfico
       const query = `
         WITH daily_data AS (
@@ -1052,7 +1082,15 @@ class CampaignsService {
             MAX(s.source_platform) AS source_platform,
             MAX(s.utm_source) AS utm_source,
             MAX(s.utm_medium) AS utm_medium,
-            MAX(s.utm_campaign) AS utm_campaign
+            MAX(s.utm_campaign) AS utm_campaign,
+            -- Agregamos los campos de dispositivo, ubicación e IP
+            MAX(s.ip) AS ip,
+            MAX(s.device_type) AS device_type,
+            MAX(s.browser) AS browser,
+            MAX(s.os) AS os,
+            MAX(s.geo_country) AS geo_country,
+            MAX(s.geo_region) AS geo_region,
+            MAX(s.geo_city) AS geo_city
           FROM tracking.sessions s
           WHERE s.ad_id = ANY($1::text[])
             AND s.visitor_id IS NOT NULL
@@ -1077,6 +1115,14 @@ class CampaignsService {
           fs.utm_source,
           fs.utm_medium,
           fs.utm_campaign,
+          -- Agregamos los nuevos campos al SELECT principal
+          fs.ip,
+          fs.device_type,
+          fs.browser,
+          fs.os,
+          fs.geo_country,
+          fs.geo_region,
+          fs.geo_city,
           c.contact_id,
           c.first_name,
           c.last_name,
@@ -1124,14 +1170,40 @@ class CampaignsService {
           hasContact: Boolean(row.contact_id),
           contact,
           sources: row.channel || row.source_platform || row.utm_source || 'Facebook',
+          // Agregamos IP como campo directo
+          ip: row.ip || null,
+          // Datos del dispositivo con valores reales o por defecto agnósticos
           device: {
-            type: 'unknown',
-            browser: 'unknown'
+            type: row.device_type || 'No identificado',
+            browser: row.browser || 'No identificado',
+            os: row.os || 'No identificado'
           },
-          location: {
-            country: 'unknown',
-            city: 'unknown'
-          }
+          // Ubicación: primero intentar con datos de BD, si no hay, usar geolocalización por IP
+          location: (() => {
+            // Si tenemos datos geo de la BD, usarlos
+            if (row.geo_country) {
+              return {
+                country: row.geo_country,
+                region: row.geo_region || null,
+                city: row.geo_city || 'No disponible'
+              };
+            }
+            // Si no hay datos en BD pero tenemos IP, intentar geolocalización
+            if (row.ip) {
+              const geoData = getGeoFromIP(row.ip);
+              return {
+                country: geoData.country || 'No disponible',
+                region: geoData.region || null,
+                city: geoData.city || 'No disponible'
+              };
+            }
+            // Si no hay ni datos geo ni IP
+            return {
+              country: 'No disponible',
+              region: null,
+              city: 'No disponible'
+            };
+          })()
         };
       });
     } catch (error) {
@@ -1146,6 +1218,12 @@ class CampaignsService {
    */
   async getUniqueContactsByType({ adIds, startDate, endDate, type }) {
     try {
+      // Ajustar fechas para incluir todo el día si vienen
+      if (startDate && endDate) {
+        const adjusted = adjustDateRange(startDate, endDate);
+        startDate = adjusted.startDate;
+        endDate = adjusted.endDate;
+      }
       // Verificar si existe la tabla de Meta ads
       const hasAdsTable = await checkMetaAdsTableExists();
 

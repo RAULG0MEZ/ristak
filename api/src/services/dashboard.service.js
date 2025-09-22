@@ -1,9 +1,20 @@
 const { databasePool } = require('../config/database.config');
 const { queryMetaAdsIfExists } = require('../utils/meta-helper');
+const { getGeoFromIP } = require('../utils/geo-helper');
 
 class DashboardService {
   async getFinancialMetrics(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día completo
+      const adjustedStartDate = new Date(startDate);
+      adjustedStartDate.setHours(0, 0, 0, 0);
+
+      const adjustedEndDate = new Date(endDate);
+      adjustedEndDate.setHours(23, 59, 59, 999);
+
+      // Usar las fechas ajustadas para todas las queries
+      startDate = adjustedStartDate;
+      endDate = adjustedEndDate;
       // First check if Meta ads are synced
       const checkAdsQuery = `
         SELECT COUNT(*) as count
@@ -131,6 +142,16 @@ class DashboardService {
 
   async getFunnelMetrics(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día completo
+      const adjustedStartDate = new Date(startDate);
+      adjustedStartDate.setHours(0, 0, 0, 0);
+
+      const adjustedEndDate = new Date(endDate);
+      adjustedEndDate.setHours(23, 59, 59, 999);
+
+      // Usar las fechas ajustadas para todas las queries
+      startDate = adjustedStartDate;
+      endDate = adjustedEndDate;
       // Primero verificar si hay datos de sesiones
       const sessionsCountQuery = `
         SELECT COUNT(*) as visitors_count
@@ -186,6 +207,16 @@ class DashboardService {
 
   async getHistoricalRevenue(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día completo
+      const adjustedStartDate = new Date(startDate);
+      adjustedStartDate.setHours(0, 0, 0, 0);
+
+      const adjustedEndDate = new Date(endDate);
+      adjustedEndDate.setHours(23, 59, 59, 999);
+
+      // Usar las fechas ajustadas para todas las queries
+      startDate = adjustedStartDate;
+      endDate = adjustedEndDate;
       // Check if Meta ads exist
       const checkAdsQuery = `
         SELECT COUNT(*) as count
@@ -285,6 +316,16 @@ class DashboardService {
 
   async getTrafficSources(startDate, endDate) {
     try {
+      // Ajustar fechas para incluir todo el día completo
+      const adjustedStartDate = new Date(startDate);
+      adjustedStartDate.setHours(0, 0, 0, 0);
+
+      const adjustedEndDate = new Date(endDate);
+      adjustedEndDate.setHours(23, 59, 59, 999);
+
+      // Usar las fechas ajustadas para todas las queries
+      startDate = adjustedStartDate;
+      endDate = adjustedEndDate;
       // Query que identifica Instagram Ads vs Facebook Ads basándose en browser y site_source_name
       const query = `
         WITH traffic_data AS (
@@ -451,6 +492,201 @@ class DashboardService {
       };
     } catch (error) {
       console.error('Error fetching dashboard metrics:', error);
+      throw error;
+    }
+  }
+
+  async getVisitorLocations(startDate, endDate, country = null) {
+    try {
+      // Ajustar fechas para incluir todo el día completo
+      const adjustedStartDate = new Date(startDate);
+      adjustedStartDate.setHours(0, 0, 0, 0);
+
+      const adjustedEndDate = new Date(endDate);
+      adjustedEndDate.setHours(23, 59, 59, 999);
+
+      // Query para obtener visitantes agrupados por país
+      const query = `
+        WITH visitor_locations AS (
+          SELECT
+            visitor_id,
+            ip,
+            geo_country,
+            geo_city,
+            geo_region,
+            created_at
+          FROM tracking.sessions
+          WHERE created_at >= $1 AND created_at <= $2
+            AND visitor_id IS NOT NULL
+        ),
+        unique_visitors AS (
+          SELECT DISTINCT ON (visitor_id)
+            visitor_id,
+            ip,
+            geo_country,
+            geo_city,
+            geo_region
+          FROM visitor_locations
+          ORDER BY visitor_id, created_at DESC
+        )
+        SELECT
+          ip,
+          geo_country,
+          geo_city,
+          geo_region,
+          COUNT(*) as visitor_count
+        FROM unique_visitors
+        GROUP BY ip, geo_country, geo_city, geo_region
+        ORDER BY visitor_count DESC
+        LIMIT 100
+      `;
+
+      const result = await databasePool.query(query, [adjustedStartDate, adjustedEndDate]);
+
+      // Procesar resultados y enriquecer con geolocalización
+      const locationMap = new Map();
+      const stateMap = new Map(); // Para agrupar por estados cuando sea necesario
+
+      result.rows.forEach(row => {
+        let countryName = row.geo_country;
+        let cityName = row.geo_city;
+        let regionName = row.geo_region;
+
+        // Si no hay datos geo pero tenemos IP, intentar obtenerlos
+        if (!countryName && row.ip) {
+          const geoData = getGeoFromIP(row.ip);
+          countryName = geoData.country;
+          cityName = geoData.city;
+          regionName = geoData.region;
+        }
+
+        // Si aún no hay país, usar "Desconocido"
+        if (!countryName || countryName === 'Via Facebook/Proxy') {
+          countryName = 'Desconocido';
+        }
+
+        const visitorCount = parseInt(row.visitor_count) || 1;
+
+        // Si estamos filtrando por país específico (ej: México), agrupar por estado/región
+        if (country && countryName === country && regionName) {
+          const stateKey = regionName;
+
+          if (stateMap.has(stateKey)) {
+            stateMap.get(stateKey).visitors += visitorCount;
+            if (cityName && !stateMap.get(stateKey).cities.includes(cityName)) {
+              stateMap.get(stateKey).cities.push(cityName);
+            }
+          } else {
+            stateMap.set(stateKey, {
+              country: countryName,
+              state: regionName,
+              visitors: visitorCount,
+              cities: cityName ? [cityName] : [],
+              percentage: 0
+            });
+          }
+        }
+
+        // Siempre agrupar por país para vista mundial
+        const key = countryName;
+
+        if (locationMap.has(key)) {
+          locationMap.get(key).visitors += visitorCount;
+          // Agregar ciudad si existe y no está ya en la lista
+          if (cityName && !locationMap.get(key).cities.includes(cityName)) {
+            locationMap.get(key).cities.push(cityName);
+          }
+          // Agregar región/estado
+          if (regionName && !locationMap.get(key).regions) {
+            locationMap.get(key).regions = [];
+          }
+          if (regionName && locationMap.get(key).regions && !locationMap.get(key).regions.includes(regionName)) {
+            locationMap.get(key).regions.push(regionName);
+          }
+        } else {
+          locationMap.set(key, {
+            country: countryName,
+            visitors: visitorCount,
+            cities: cityName ? [cityName] : [],
+            regions: regionName ? [regionName] : [],
+            percentage: 0
+          });
+        }
+      });
+
+      // Decidir qué datos usar según si hay filtro de país
+      let locations;
+      let isStateView = false;
+
+      if (country && stateMap.size > 0) {
+        // Si hay filtro de país y tenemos datos de estados, usar estados
+        locations = Array.from(stateMap.values());
+        isStateView = true;
+      } else {
+        // Si no, usar países
+        locations = Array.from(locationMap.values());
+      }
+
+      const totalVisitors = locations.reduce((sum, loc) => sum + loc.visitors, 0);
+
+      locations.forEach(loc => {
+        loc.percentage = totalVisitors > 0 ? (loc.visitors / totalVisitors) * 100 : 0;
+      });
+
+      // Ordenar por número de visitantes
+      locations.sort((a, b) => b.visitors - a.visitors);
+
+      // Tomar top 15 ubicaciones
+      const topLocations = locations.slice(0, 15);
+
+      // Agregar coordenadas para los países principales (para el mapa)
+      const countryCoordinates = {
+        'México': { lat: 23.6345, lng: -102.5528 },
+        'Estados Unidos': { lat: 37.0902, lng: -95.7129 },
+        'Canadá': { lat: 56.1304, lng: -106.3468 },
+        'España': { lat: 40.4637, lng: -3.7492 },
+        'Argentina': { lat: -38.4161, lng: -63.6167 },
+        'Colombia': { lat: 4.5709, lng: -74.2973 },
+        'Chile': { lat: -35.6751, lng: -71.5430 },
+        'Perú': { lat: -9.1900, lng: -75.0152 },
+        'Brasil': { lat: -14.2350, lng: -51.9253 },
+        'Venezuela': { lat: 6.4238, lng: -66.5897 },
+        'Ecuador': { lat: -1.8312, lng: -78.1834 },
+        'Guatemala': { lat: 15.7835, lng: -90.2308 },
+        'Costa Rica': { lat: 9.7489, lng: -83.7534 },
+        'Panamá': { lat: 8.5380, lng: -80.7821 },
+        'República Dominicana': { lat: 18.7357, lng: -70.1627 },
+        'Honduras': { lat: 15.2000, lng: -86.2419 },
+        'El Salvador': { lat: 13.7942, lng: -88.8965 },
+        'Nicaragua': { lat: 12.8654, lng: -85.2072 },
+        'Bolivia': { lat: -16.2902, lng: -63.5887 },
+        'Paraguay': { lat: -23.4425, lng: -58.4438 },
+        'Uruguay': { lat: -32.5228, lng: -55.7658 },
+        'Local': { lat: 0, lng: 0 },
+        'Desconocido': { lat: 0, lng: 0 }
+      };
+
+      // Agregar coordenadas a las ubicaciones
+      topLocations.forEach(loc => {
+        const coords = countryCoordinates[loc.country];
+        if (coords) {
+          loc.lat = coords.lat;
+          loc.lng = coords.lng;
+        } else {
+          // Si no tenemos coordenadas, usar 0,0
+          loc.lat = 0;
+          loc.lng = 0;
+        }
+      });
+
+      return {
+        locations: topLocations,
+        totalVisitors: totalVisitors,
+        totalCountries: isStateView ? stateMap.size : locationMap.size,
+        viewType: isStateView ? 'states' : 'countries'
+      };
+    } catch (error) {
+      console.error('Error fetching visitor locations:', error);
       throw error;
     }
   }

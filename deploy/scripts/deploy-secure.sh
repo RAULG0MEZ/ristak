@@ -595,18 +595,18 @@ transfer_files() {
     # Crear archivo tar EXCLUYENDO todos los .env y archivos sensibles
     cd "${PROJECT_ROOT}"
     tar -czf /tmp/ristak-deploy.tar.gz \
-        --exclude=.env \
-        --exclude=.env.* \
-        --exclude=*.secret \
-        --exclude=*.key \
-        --exclude=*.pem \
-        --exclude=node_modules \
-        --exclude=.git \
-        --exclude=.DS_Store \
-        --exclude=api/migrations \
-        --exclude=api/scripts/setup-*.js \
-        --exclude=api/scripts/update-*.js \
-        --exclude=api/test-*.json \
+        --exclude='.env' \
+        --exclude='.env.*' \
+        --exclude='*.secret' \
+        --exclude='*.key' \
+        --exclude='*.pem' \
+        --exclude='node_modules' \
+        --exclude='.git' \
+        --exclude='.DS_Store' \
+        --exclude='api/migrations' \
+        --exclude='api/scripts/setup-*.js' \
+        --exclude='api/scripts/update-*.js' \
+        --exclude='api/test-*.json' \
         .
 
     # Verificar que no hay credenciales en el tar (excluyendo migraciones SQL que son necesarias)

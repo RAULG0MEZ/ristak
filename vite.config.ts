@@ -36,6 +36,23 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       'process.env.NODE_ENV': JSON.stringify(env.NODE_ENV || 'development')
+    },
+    build: {
+      // Incrementar el límite para evitar warnings innecesarios
+      chunkSizeWarningLimit: 2000,
+      rollupOptions: {
+        output: {
+          // Code splitting manual para optimizar carga
+          manualChunks: {
+            // Librerías grandes en chunks separados
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-charts': ['recharts'],
+            'vendor-icons': ['lucide-react', 'react-icons', '@lobehub/icons'],
+            'vendor-ui': ['antd', 'framer-motion'],
+            'vendor-utils': ['date-fns', 'clsx', 'tailwind-merge']
+          }
+        }
+      }
     }
   }
 })

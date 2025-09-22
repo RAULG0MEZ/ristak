@@ -7,5 +7,6 @@ router.get('/metrics', dashboardController.getDashboardMetrics);
 router.get('/historical', dashboardController.getHistoricalData);
 router.get('/traffic-sources', dashboardController.getTrafficSources);
 router.get('/funnel', dashboardController.getFunnelData);
+router.get('/visitor-locations', dashboardController.getVisitorLocations);
 
 module.exports = router;

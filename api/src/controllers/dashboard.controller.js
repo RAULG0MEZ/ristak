@@ -7,6 +7,7 @@ class DashboardController {
     this.getHistoricalData = this.getHistoricalData.bind(this);
     this.getTrafficSources = this.getTrafficSources.bind(this);
     this.getFunnelData = this.getFunnelData.bind(this);
+    this.getVisitorLocations = this.getVisitorLocations.bind(this);
   }
 
   async getDashboardMetrics(req, res) {
@@ -177,6 +178,31 @@ class DashboardController {
       console.error('Funnel data error:', error);
       res.status(500).json({
         error: 'Failed to fetch funnel data'
+      });
+    }
+  }
+
+  async getVisitorLocations(req, res) {
+    try {
+      const { start, end, country } = req.query;
+
+      if (!start || !end) {
+        return res.status(400).json({
+          error: 'Missing required parameters: start and end dates'
+        });
+      }
+
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+
+      // Pasar el país si se especifica para filtrar por estados/regiones
+      const locationData = await dashboardService.getVisitorLocations(startDate, endDate, country || null);
+
+      res.json(locationData);
+    } catch (error) {
+      console.error('Visitor locations error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch visitor locations'
       });
     }
   }

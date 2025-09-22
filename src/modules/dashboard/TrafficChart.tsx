@@ -5,32 +5,43 @@ import { Icons } from '../../icons'
 import { useDateRange } from '../../contexts/DateContext'
 import { useTrafficData } from '../../hooks/useTrafficData'
 import { useTheme } from '../../contexts/ThemeContext'
-// Íconos de redes sociales oficiales
-import {
-  FaFacebook, FaInstagram, FaGoogle, FaTiktok,
-  FaLinkedin, FaXTwitter, FaPinterest, FaSnapchat,
-  FaReddit, FaWhatsapp
-} from 'react-icons/fa6'
-import { HiMail, HiSearch, HiLink, HiExternalLink, HiQuestionMarkCircle } from 'react-icons/hi'
 
-// Mapeo con íconos oficiales y colores de marca 2024
-const sourceConfig: Record<string, { icon: any; brandColor: string }> = {
-  'Facebook Ads': { icon: FaFacebook, brandColor: '#1877f2' },
-  'Instagram Ads': { icon: FaInstagram, brandColor: '#c32aa3' },
-  'Google Ads': { icon: FaGoogle, brandColor: '#4285f4' },
-  'TikTok Ads': { icon: FaTiktok, brandColor: '#ee1d52' },
-  'LinkedIn Ads': { icon: FaLinkedin, brandColor: '#0a66c2' },
-  'Twitter/X Ads': { icon: FaXTwitter, brandColor: '#000000' },
-  'Pinterest Ads': { icon: FaPinterest, brandColor: '#bd081c' },
-  'Snapchat Ads': { icon: FaSnapchat, brandColor: '#fffc00' },
-  'Reddit Ads': { icon: FaReddit, brandColor: '#ff4301' },
-  'WhatsApp': { icon: FaWhatsapp, brandColor: '#25d366' },
-  'Email': { icon: HiMail, brandColor: '#ea4335' },
-  'Orgánico': { icon: HiSearch, brandColor: '#34a853' },
-  'Directo': { icon: HiLink, brandColor: '#5865f2' },
-  'Referidos': { icon: HiExternalLink, brandColor: '#fbbc05' },
-  'Otros': { icon: HiQuestionMarkCircle, brandColor: '#6b7280' },
-  'Other': { icon: HiQuestionMarkCircle, brandColor: '#6b7280' }
+// Importar SVGs directamente
+import FacebookSVG from '../../theme/social-icons-master/SVG/Color/Facebook.svg'
+import InstagramSVG from '../../theme/social-icons-master/SVG/Color/Instagram.svg'
+import GoogleSVG from '../../theme/social-icons-master/SVG/Color/Google.svg'
+import TikTokSVG from '../../theme/social-icons-master/SVG/Color/Tik Tok.svg'
+import LinkedInSVG from '../../theme/social-icons-master/SVG/Color/LinkedIn.svg'
+import TwitterSVG from '../../theme/social-icons-master/SVG/Color/Twitter.svg'
+import PinterestSVG from '../../theme/social-icons-master/SVG/Color/Pinterest.svg'
+import SnapchatSVG from '../../theme/social-icons-master/SVG/Color/Snapchat.svg'
+import RedditSVG from '../../theme/social-icons-master/SVG/Color/Reddit.svg'
+import WhatsAppSVG from '../../theme/social-icons-master/SVG/Color/WhatsApp.svg'
+
+// Íconos genéricos de lucide-react
+import { Mail, Search, Link, ExternalLink, Globe } from 'lucide-react'
+
+// Mapeo con colores e iconos de marca 2024
+const sourceConfig: Record<string, { brandColor: string; icon: string | React.ComponentType<any> }> = {
+  'Facebook Ads': { brandColor: '#1877f2', icon: FacebookSVG },
+  'Facebook Orgánico': { brandColor: '#1877f2', icon: FacebookSVG },
+  'Instagram Ads': { brandColor: '#c32aa3', icon: InstagramSVG },
+  'Instagram Orgánico': { brandColor: '#c32aa3', icon: InstagramSVG },
+  'Google Ads': { brandColor: '#4285f4', icon: GoogleSVG },
+  'Google Orgánico': { brandColor: '#34a853', icon: GoogleSVG },
+  'TikTok Ads': { brandColor: '#ee1d52', icon: TikTokSVG },
+  'LinkedIn Ads': { brandColor: '#0a66c2', icon: LinkedInSVG },
+  'Twitter/X Ads': { brandColor: '#000000', icon: TwitterSVG },
+  'Pinterest Ads': { brandColor: '#bd081c', icon: PinterestSVG },
+  'Snapchat Ads': { brandColor: '#fffc00', icon: SnapchatSVG },
+  'Reddit Ads': { brandColor: '#ff4301', icon: RedditSVG },
+  'WhatsApp': { brandColor: '#25d366', icon: WhatsAppSVG },
+  'Email': { brandColor: '#ea4335', icon: Mail },
+  'Orgánico': { brandColor: '#34a853', icon: Search },
+  'Directo': { brandColor: '#5865f2', icon: Link },
+  'Referidos': { brandColor: '#fbbc05', icon: ExternalLink },
+  'Otros': { brandColor: '#6b7280', icon: Globe },
+  'Other': { brandColor: '#6b7280', icon: Globe }
 }
 
 export function TrafficChart() {
@@ -46,7 +57,8 @@ export function TrafficChart() {
     const config = sourceConfig[item.name] || sourceConfig.Other
     return {
       ...item,
-      ...config,
+      icon: config.icon,
+      brandColor: config.brandColor,
       // Usar colores de marca con opacidad para el gráfico de dona
       color: theme === 'dark'
         ? `${config.brandColor}99` // 60% opacidad en dark mode
@@ -82,7 +94,7 @@ export function TrafficChart() {
           </button>
         </div>
 
-        {/* Gráfico de dona con colores neutros */}
+        {/* Gráfico de dona con colores de marca */}
         <div className="h-56 relative mb-6">
           {loading ? (
             <div className="flex items-center justify-center h-full">
@@ -150,13 +162,12 @@ export function TrafficChart() {
             </div>
           ) : (
           data.map((item) => {
-            const Icon = item.icon
             const percentage = (item.value / totalVisits) * 100
 
             return (
               <div key={item.name} className="group transition-all hover:scale-[1.02]">
                 <div className="flex items-center gap-4">
-                  {/* Icono con color de marca */}
+                  {/* Icono con fondo de color de marca */}
                   <div
                     className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all group-hover:shadow-lg"
                     style={{
@@ -165,10 +176,18 @@ export function TrafficChart() {
                         : `${item.brandColor}15`  // 9% opacidad en light
                     }}
                   >
-                    <Icon
-                      className="w-5 h-5 transition-transform group-hover:scale-110"
-                      style={{ color: item.brandColor }}
-                    />
+                    {typeof item.icon === 'string' ? (
+                      <img
+                        src={item.icon}
+                        className="w-5 h-5 transition-transform group-hover:scale-110"
+                        alt={item.name}
+                      />
+                    ) : (
+                      <item.icon
+                        className="w-5 h-5 transition-transform group-hover:scale-110"
+                        style={{ color: item.brandColor }}
+                      />
+                    )}
                   </div>
 
                   {/* Contenido principal */}
