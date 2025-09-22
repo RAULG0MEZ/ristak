@@ -72,6 +72,76 @@ class WebhookService {
         }
       }
 
+      // NUEVO: Si hay información de calendario/cita, guardarla en tabla appointments
+      if (data.calendar && data.calendar.appointmentId) {
+        try {
+          console.log('[Webhook → Appointments] Guardando información de cita para contacto:', unifiedContact.contact_id);
+
+          const appointmentData = {
+            ghl_appointment_id: data.calendar.appointmentId || data.calendar.id,
+            contact_id: unifiedContact.contact_id,
+            title: data.calendar.title || 'Cita sin título',
+            location: data.calendar.address || '',
+            start_time: data.calendar.startTime ? new Date(data.calendar.startTime).toISOString() : null,
+            end_time: data.calendar.endTime ? new Date(data.calendar.endTime).toISOString() : null,
+            status: data.calendar.status || data.calendar.appoinmentStatus || 'scheduled',
+            calendar_name: data.calendar.calendarName || '',
+            appointment_timezone: data.calendar.selectedTimezone || data.timezone || 'America/Mexico_City',
+            created_at: data.calendar.date_created ? new Date(data.calendar.date_created).toISOString() : new Date().toISOString(),
+            webhook_data: JSON.stringify(data.calendar) // Guardar todo el objeto calendar como JSONB
+          };
+
+          // Calcular duración en minutos si tenemos start y end
+          if (appointmentData.start_time && appointmentData.end_time) {
+            const start = new Date(appointmentData.start_time);
+            const end = new Date(appointmentData.end_time);
+            appointmentData.duration = Math.round((end - start) / (1000 * 60)); // Duración en minutos
+          }
+
+          // Insertar o actualizar la cita
+          const appointmentQuery = `
+            INSERT INTO appointments (
+              ghl_appointment_id, contact_id, title, location,
+              start_time, end_time, status, calendar_name,
+              appointment_timezone, duration, created_at, updated_at, webhook_data
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12::jsonb)
+            ON CONFLICT (ghl_appointment_id)
+            DO UPDATE SET
+              title = EXCLUDED.title,
+              location = EXCLUDED.location,
+              start_time = EXCLUDED.start_time,
+              end_time = EXCLUDED.end_time,
+              status = EXCLUDED.status,
+              calendar_name = EXCLUDED.calendar_name,
+              appointment_timezone = EXCLUDED.appointment_timezone,
+              duration = EXCLUDED.duration,
+              webhook_data = EXCLUDED.webhook_data,
+              updated_at = NOW()
+            RETURNING appointment_id
+          `;
+
+          const appointmentResult = await databasePool.query(appointmentQuery, [
+            appointmentData.ghl_appointment_id,
+            appointmentData.contact_id,
+            appointmentData.title,
+            appointmentData.location,
+            appointmentData.start_time,
+            appointmentData.end_time,
+            appointmentData.status,
+            appointmentData.calendar_name,
+            appointmentData.appointment_timezone,
+            appointmentData.duration,
+            appointmentData.created_at,
+            appointmentData.webhook_data
+          ]);
+
+          console.log('[Webhook → Appointments] Cita guardada/actualizada:', appointmentResult.rows[0]?.appointment_id);
+        } catch (appointmentError) {
+          // No fallar el webhook si falla guardar la cita
+          console.error('[Webhook → Appointments] Error guardando cita:', appointmentError);
+        }
+      }
+
       console.log('[Webhook] Contacto procesado exitosamente:', unifiedContact.contact_id);
 
       return unifiedContact;
