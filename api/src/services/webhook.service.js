@@ -168,11 +168,11 @@ class WebhookService {
     // EXTRAER DATOS DEL CUSTOMDATA PRIMERO para validación
     const customData = data.customData || {};
 
-    // Campos requeridos - verificar tanto en customData como en raíz
+    // Campos requeridos - solo transaction_id y monto son customData
     const requiredFields = [
       { name: 'transaction_id', getValue: () => customData.transaction_id || data.transaction_id },
       { name: 'monto', getValue: () => customData.monto || data.monto },
-      { name: 'contact_id', getValue: () => customData.contact_id || data.contact_id }
+      { name: 'contact_id', getValue: () => data.contact_id } // contact_id NO es customData
     ];
 
     const missingFields = [];
@@ -194,7 +194,6 @@ class WebhookService {
       console.log('[Webhook Payment] CustomData recibido:', JSON.stringify(customData));
       console.log('[Webhook Payment] transaction_id extraído:', customData.transaction_id || data.transaction_id);
       console.log('[Webhook Payment] monto extraído:', customData.monto || data.monto);
-      console.log('[Webhook Payment] contact_id extraído:', customData.contact_id || data.contact_id);
     }
 
     // NUEVO: Si viene rstk_vid, loguear para tracking
@@ -204,15 +203,15 @@ class WebhookService {
     }
 
     // Mapear campos del webhook a campos de la BD
-    // PRIORIZAR customData, luego fallback a campos en raíz
+    // SOLO transaction_id y monto son customData
     const paymentData = {
       transaction_id: customData.transaction_id || data.transaction_id,
       amount: parseFloat(customData.monto || data.monto) || 0, // Mapear "monto" a "amount"
-      description: customData.nota || data.nota || null, // Mapear "nota" a "description"
-      contact_id: customData.contact_id || data.contact_id,
-      currency: customData.currency || data.currency || 'MXN',
+      description: data.nota || null, // nota NO es customData
+      contact_id: data.contact_id, // contact_id NO es customData
+      currency: data.currency || 'MXN',
       status: 'completed',
-      payment_method: customData.payment_method || data.payment_method || 'unknown',
+      payment_method: data.payment_method || 'unknown',
       // Usar ISO string para garantizar UTC
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -390,12 +389,19 @@ class WebhookService {
   
   // Mapeo flexible para reembolsos
   async processRefund(data) {
-    const requiredFields = ['transaction_id'];
+    // EXTRAER DATOS DEL CUSTOMDATA PRIMERO para validación
+    const customData = data.customData || {};
+
+    // Campos requeridos - solo transaction_id es customData
+    const requiredFields = [
+      { name: 'transaction_id', getValue: () => customData.transaction_id || data.transaction_id }
+    ];
+
     const missingFields = [];
 
     for (const field of requiredFields) {
-      if (!data[field]) {
-        missingFields.push(field);
+      if (!field.getValue()) {
+        missingFields.push(field.name);
       }
     }
 
@@ -406,6 +412,15 @@ class WebhookService {
     }
 
     try {
+      // DEBUG: Mostrar customData recibido en reembolsos
+      if (customData && Object.keys(customData).length > 0) {
+        console.log('[Webhook Refund] CustomData recibido:', JSON.stringify(customData));
+        console.log('[Webhook Refund] transaction_id extraído:', customData.transaction_id || data.transaction_id);
+      }
+
+      // Extraer transaction_id desde customData o fallback
+      const transactionId = customData.transaction_id || data.transaction_id;
+
       // Buscar el pago original con validación de tenant
       const paymentQuery = `
         SELECT * FROM public.payments
@@ -413,18 +428,18 @@ class WebhookService {
       `;
 
       const paymentResult = await databasePool.query(paymentQuery, [
-        data.transaction_id
+        transactionId
       ]);
 
       if (paymentResult.rows.length === 0) {
-        throw new Error(`Transacción no encontrada: ${data.transaction_id}`);
+        throw new Error(`Transacción no encontrada: ${transactionId}`);
       }
 
       const originalPayment = paymentResult.rows[0];
 
       // Verificar que el pago no esté ya reembolsado
       if (originalPayment.status === 'refunded') {
-        throw new Error(`La transacción ${data.transaction_id} ya fue reembolsada`);
+        throw new Error(`La transacción ${transactionId} ya fue reembolsada`);
       }
 
       // Actualizar el pago para marcarlo como reembolsado con validación de tenant
@@ -440,11 +455,11 @@ class WebhookService {
 
       const reason = data.reason || 'Reembolso procesado vía webhook';
       const result = await databasePool.query(updateQuery, [
-        data.transaction_id,
+        transactionId,
         reason
       ]);
 
-      console.log(`[Webhook] Pago ${data.transaction_id} marcado como reembolsado`);
+      console.log(`[Webhook] Pago ${transactionId} marcado como reembolsado`);
 
       return result.rows[0];
     } catch (error) {
