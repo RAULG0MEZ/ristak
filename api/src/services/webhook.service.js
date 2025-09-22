@@ -78,7 +78,7 @@ class WebhookService {
           console.log('[Webhook → Appointments] Guardando información de cita para contacto:', unifiedContact.contact_id);
 
           const appointmentData = {
-            ghl_appointment_id: data.calendar.appointmentId || data.calendar.id,
+            ext_crm_appointment_id: data.calendar.appointmentId || data.calendar.id,
             contact_id: unifiedContact.contact_id,
             title: data.calendar.title || 'Cita sin título',
             location: data.calendar.address || '',
@@ -101,11 +101,11 @@ class WebhookService {
           // Insertar o actualizar la cita
           const appointmentQuery = `
             INSERT INTO appointments (
-              ghl_appointment_id, contact_id, title, location,
+              ext_crm_appointment_id, contact_id, title, location,
               start_time, end_time, status, calendar_name,
               appointment_timezone, duration, created_at, updated_at, webhook_data
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12::jsonb)
-            ON CONFLICT (ghl_appointment_id)
+            ON CONFLICT (ext_crm_appointment_id)
             DO UPDATE SET
               title = EXCLUDED.title,
               location = EXCLUDED.location,
@@ -121,7 +121,7 @@ class WebhookService {
           `;
 
           const appointmentResult = await databasePool.query(appointmentQuery, [
-            appointmentData.ghl_appointment_id,
+            appointmentData.ext_crm_appointment_id,
             appointmentData.contact_id,
             appointmentData.title,
             appointmentData.location,
