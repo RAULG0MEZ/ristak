@@ -148,11 +148,25 @@ class WebhookService {
     console.log('[Webhook] CustomData extraído para pago:', customData);
 
     try {
+      // Buscar el contacto por ext_crm_id
+      const contactQuery = `
+        SELECT contact_id FROM contacts
+        WHERE ext_crm_id = $1
+        LIMIT 1
+      `;
+      const contactResult = await databasePool.query(contactQuery, [data.contact_id]);
+
+      if (contactResult.rows.length === 0) {
+        throw new Error(`Contacto no encontrado para contact_id: ${data.contact_id}`);
+      }
+
+      const finalContactId = contactResult.rows[0].contact_id;
+
       const paymentData = {
         transaction_id: data.transaction_id,
         amount: parseFloat(data.amount || data.monto) || 0,
         description: data.description || data.nota || null,
-        contact_id: data.contact_id,
+        contact_id: finalContactId, // Usar nuestro contact_id interno
         currency: data.currency || 'MXN',
         status: 'completed',
         payment_method: data.payment_method || 'unknown'
