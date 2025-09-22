@@ -10,38 +10,10 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-*.local
 
-# === SEGURIDAD - NUNCA SUBIR ESTOS ARCHIVOS ===
-# Variables de entorno con credenciales
-.env
-.env.*
-!.env.example
-
-# Archivos de credenciales y secretos
-*.secret
-*.key
-*.pem
-*.p12
-*.pfx
-*.cert
-*.crt
-
-# Archivos de configuración con contraseñas
-config.local.js
-config.production.js
-secrets.json
-credentials.json
-
-# Archivos de deployment con información sensible
-deploy.conf
-.deploy.secret
-
-# Backups que pueden contener datos sensibles
-*.backup
-*.bak
-*.old
-backup/
+# === CONFIGURACIÓN MODIFICADA ===
+# Usuario solicitó que TODO se suba al repo incluyendo .env y credenciales
+# Se removieron todas las protecciones de seguridad por solicitud explícita
 
 # Editor directories and files
 .vscode/*
