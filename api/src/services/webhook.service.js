@@ -68,7 +68,6 @@ class WebhookService {
             phone = COALESCE($5, phone),
             company = COALESCE($6, company),
             status = COALESCE($7, status),
-            custom_data = COALESCE($8, custom_data),
             updated_at = NOW()
           WHERE contact_id = $1
           RETURNING contact_id, email, phone
@@ -81,8 +80,7 @@ class WebhookService {
           data.email || null,
           data.phone || null,
           data.company || null,
-          data.status || 'lead',
-          JSON.stringify(customData)
+          data.status || 'lead'
         ]);
 
         console.log(`✅ [Webhook] Contacto actualizado: ${finalContactId}`);
@@ -95,8 +93,8 @@ class WebhookService {
         const insertQuery = `
           INSERT INTO contacts (
             contact_id, first_name, last_name, email, phone, company,
-            ext_crm_id, status, source, custom_data, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+            ext_crm_id, status, source, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
           RETURNING contact_id, email, phone
         `;
 
@@ -109,8 +107,7 @@ class WebhookService {
           data.company || null,
           data.contact_id, // ext_crm_id = GHL contact_id
           data.status || 'lead',
-          'webhook',
-          JSON.stringify(customData)
+          'webhook'
         ]);
 
         console.log(`✅ [Webhook] Contacto creado: ${finalContactId}`);
@@ -158,20 +155,18 @@ class WebhookService {
         contact_id: data.contact_id,
         currency: data.currency || 'MXN',
         status: 'completed',
-        payment_method: data.payment_method || 'unknown',
-        custom_data: JSON.stringify(customData) // Guardar customData como JSON
+        payment_method: data.payment_method || 'unknown'
       };
 
       const query = `
         INSERT INTO payments (
           id, transaction_id, amount, description, contact_id,
-          currency, status, payment_method, custom_data, created_at, updated_at
-        ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+          currency, status, payment_method, created_at, updated_at
+        ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
         ON CONFLICT (transaction_id)
         DO UPDATE SET
           amount = EXCLUDED.amount,
           description = EXCLUDED.description,
-          custom_data = EXCLUDED.custom_data,
           updated_at = NOW()
         RETURNING *
       `;
@@ -183,8 +178,7 @@ class WebhookService {
         paymentData.contact_id,
         paymentData.currency,
         paymentData.status,
-        paymentData.payment_method,
-        paymentData.custom_data
+        paymentData.payment_method
       ]);
 
       console.log(`✅ [Webhook] Pago procesado con customData: ${data.transaction_id}`);
@@ -316,14 +310,13 @@ class WebhookService {
         throw new Error(`La transacción ${data.transaction_id} ya fue reembolsada`);
       }
 
-      // Marcar como reembolsado y actualizar customData
+      // Marcar como reembolsado
       const updateQuery = `
         UPDATE payments
         SET
           status = 'refunded',
           updated_at = NOW(),
-          description = COALESCE(description, '') || ' | Refunded: ' || $2,
-          custom_data = COALESCE(custom_data, '{}')::jsonb || $3::jsonb
+          description = COALESCE(description, '') || ' | Refunded: ' || $2
         WHERE transaction_id = $1
         RETURNING *
       `;
@@ -331,8 +324,7 @@ class WebhookService {
       const reason = data.reason || 'Reembolso procesado vía webhook';
       const result = await databasePool.query(updateQuery, [
         data.transaction_id,
-        reason,
-        JSON.stringify(customData)
+        reason
       ]);
 
       console.log(`✅ [Webhook] Pago reembolsado: ${data.transaction_id}`);
