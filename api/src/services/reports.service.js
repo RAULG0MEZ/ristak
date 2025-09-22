@@ -677,10 +677,11 @@ class ReportsService {
       endDate = adjusted.endDate;
       const result = await databasePool.query(`
         SELECT
-          a.id,
+          MIN(a.appointment_id) as id,
           a.contact_id,
-          a.created_at,
-          a.metadata,
+          MIN(a.created_at) as created_at,
+          MIN(a.appointment_date) as appointment_date,
+          COUNT(a.appointment_id) as appointment_count,
           c.first_name,
           c.last_name,
           c.email,
@@ -689,23 +690,25 @@ class ReportsService {
         FROM appointments a
         LEFT JOIN contacts c ON a.contact_id = c.contact_id
         WHERE a.created_at >= $1 AND a.created_at <= $2
-        ORDER BY a.created_at DESC
+        GROUP BY a.contact_id, c.first_name, c.last_name, c.email, c.phone, c.rstk_adid
+        ORDER BY MIN(a.created_at) DESC
       `, [startDate, endDate])
-      
+
       return result.rows.map(row => ({
         id: row.id,
         contact_id: row.contact_id,
-        appointment_date: row.created_at, // Usar created_at como fecha de cita
+        appointment_date: row.appointment_date || row.created_at, // Usar appointment_date o created_at
         created_at: row.created_at,
         status: 'scheduled', // Estado por defecto
-        contact: row.first_name ? {
+        appointment_count: parseInt(row.appointment_count) || 1, // Número total de citas del contacto
+        contact: {
           contact_id: row.contact_id,
-          first_name: row.first_name,
-          last_name: row.last_name,
-          email: row.email,
-          phone: row.phone,
+          first_name: row.first_name || '',
+          last_name: row.last_name || '',
+          email: row.email || '',
+          phone: row.phone || '',
           rstk_adid: row.rstk_adid
-        } : null
+        }
       }))
     } catch (error) {
       console.error('Error getting appointments details:', error)
@@ -722,10 +725,11 @@ class ReportsService {
       endDate = adjusted.endDate;
       const result = await databasePool.query(`
         SELECT
-          a.id,
+          MIN(a.appointment_id) as id,
           a.contact_id,
-          a.created_at,
-          a.metadata,
+          MIN(a.created_at) as created_at,
+          MIN(a.appointment_date) as appointment_date,
+          COUNT(a.appointment_id) as appointment_count,
           c.first_name,
           c.last_name,
           c.email,
@@ -747,21 +751,23 @@ class ReportsService {
                 )
               )
           )
-        ORDER BY a.created_at DESC
+        GROUP BY a.contact_id, c.first_name, c.last_name, c.email, c.phone, c.rstk_adid
+        ORDER BY MIN(a.created_at) DESC
       `, [startDate, endDate])
-      
+
       return result.rows.map(row => ({
         id: row.id,
         contact_id: row.contact_id,
-        appointment_date: row.created_at, // Usar created_at como fecha de cita
+        appointment_date: row.appointment_date || row.created_at, // Usar appointment_date o created_at
         created_at: row.created_at,
         status: 'scheduled', // Estado por defecto
+        appointment_count: parseInt(row.appointment_count) || 1, // Número total de citas del contacto
         contact: {
           contact_id: row.contact_id,
-          first_name: row.first_name,
-          last_name: row.last_name,
-          email: row.email,
-          phone: row.phone,
+          first_name: row.first_name || '',
+          last_name: row.last_name || '',
+          email: row.email || '',
+          phone: row.phone || '',
           rstk_adid: row.rstk_adid
         }
       }))

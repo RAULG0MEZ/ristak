@@ -160,4 +160,7 @@ app.listen(PORT, () => {
   } else {
     console.log('ℹ️ Tracking sync cron job disabled (development mode)');
   }
+
+  // JOB RETROACTIVO ELIMINADO - Ahora solo usamos _ud de GHL
+  console.log('ℹ️ Contact tracking link job disabled (now using _ud only)');
 });

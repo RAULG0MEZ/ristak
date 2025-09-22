@@ -36,6 +36,7 @@ interface Appointment {
   appointment_date: string
   created_at: string
   status: string
+  appointment_count?: number
   contact?: Contact
 }
 
@@ -308,14 +309,24 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
       label: 'Contacto',
       visible: true,
       render: (_: any, row: Appointment) => {
-        const name = row.contact 
-          ? `${row.contact.first_name || ''} ${row.contact.last_name || ''}`.trim() || 'Sin nombre'
-          : 'Sin contacto'
+        if (!row.contact || !row.contact.contact_id) {
+          return (
+            <div>
+              <div className="font-medium text-primary">Sin contacto</div>
+              <div className="text-sm text-secondary">ID: {row.contact_id}</div>
+            </div>
+          )
+        }
+
+        const name = `${row.contact.first_name || ''} ${row.contact.last_name || ''}`.trim() || 'Sin nombre'
         return (
           <div>
             <div className="font-medium text-primary">{name}</div>
-            {row.contact?.phone && (
+            {row.contact.phone && (
               <div className="text-sm text-secondary">{row.contact.phone}</div>
+            )}
+            {row.appointment_count && row.appointment_count > 1 && (
+              <div className="text-xs text-tertiary">{row.appointment_count} citas</div>
             )}
           </div>
         )

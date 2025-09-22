@@ -1,8 +1,21 @@
 const { databasePool } = require('../config/database.config');
-const contactUnificationService = require('./contact-unification.service');
+const crypto = require('crypto');
 
 class WebhookService {
-  // Mapeo flexible para contactos CON UNIFICACIÓN INTELIGENTE
+  // Generar ID único para contactos con formato cntct_[random]
+  async generateContactId() {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let randomId = '';
+    const randomBytes = crypto.randomBytes(16);
+
+    for (let i = 0; i < 16; i++) {
+      randomId += characters[randomBytes[i] % characters.length];
+    }
+
+    return `cntct_${randomId}`;
+  }
+
+  // Procesamiento SIMPLE de contactos - CON CUSTOM DATA
   async processContact(data) {
     // Campos requeridos
     const requiredFields = ['contact_id'];
@@ -21,165 +34,103 @@ class WebhookService {
       throw error;
     }
 
-    // Preparar datos para unificación inteligente
-    // EXTRAER DATOS DEL CUSTOMDATA PRIMERO, LUEGO FALLBACK A NIVEL RAÍZ
-    const customData = data.customData || {};
+    console.log('[Webhook] Procesando contacto con customData:', data.contact_id);
 
-    const contactData = {
-      contact_id: data.contact_id,
-      first_name: data.first_name || null,
-      last_name: data.last_name || null,
-      email: data.email || null,
-      phone: data.phone || null,
-      company: data.company || null,
-      // PRIORIZAR customData, luego fallback a campos en raíz
-      rstk_adid: customData.rstk_adid || data.rstk_adid || data.first_adid || null,
-      rstk_source: customData.rstk_source || data.rstk_source || null,
-      visitor_id: customData.rstk_vid || data.rstk_vid || null, // IMPORTANTE: Guardar el visitor_id para tracking
-      ext_crm_id: data.contact_id, // Usar contact_id como ext_crm_id
-      status: data.status || 'lead',
-      source: data.source || 'webhook'
-    };
+    // Extraer CustomData específico para contactos: rstk_adid, rstk_source, rstk_vid
+    const customData = {};
+    if (data.rstk_adid !== undefined) customData.rstk_adid = data.rstk_adid;
+    if (data.rstk_source !== undefined) customData.rstk_source = data.rstk_source;
+    if (data.rstk_vid !== undefined) customData.rstk_vid = data.rstk_vid;
+
+    console.log('[Webhook] CustomData extraído para contacto:', customData);
 
     try {
-      console.log('[Webhook] Procesando contacto con unificación inteligente:', contactData.contact_id);
+      // Buscar si ya existe el contacto por ext_crm_id
+      const existingContactQuery = `
+        SELECT contact_id, email, phone FROM contacts
+        WHERE ext_crm_id = $1
+        LIMIT 1
+      `;
+      const existingResult = await databasePool.query(existingContactQuery, [data.contact_id]);
 
-      // DEBUG: Mostrar customData recibido
-      if (customData && Object.keys(customData).length > 0) {
-        console.log('[Webhook] CustomData recibido:', JSON.stringify(customData));
-        console.log('[Webhook] rstk_adid extraído:', contactData.rstk_adid);
-        console.log('[Webhook] rstk_source extraído:', contactData.rstk_source);
-        console.log('[Webhook] visitor_id extraído:', contactData.visitor_id);
+      let finalContactId;
+
+      if (existingResult.rows.length > 0) {
+        // ACTUALIZAR contacto existente
+        finalContactId = existingResult.rows[0].contact_id;
+
+        const updateQuery = `
+          UPDATE contacts
+          SET
+            first_name = COALESCE($2, first_name),
+            last_name = COALESCE($3, last_name),
+            email = COALESCE($4, email),
+            phone = COALESCE($5, phone),
+            company = COALESCE($6, company),
+            status = COALESCE($7, status),
+            custom_data = COALESCE($8, custom_data),
+            updated_at = NOW()
+          WHERE contact_id = $1
+          RETURNING contact_id, email, phone
+        `;
+
+        const updateResult = await databasePool.query(updateQuery, [
+          finalContactId,
+          data.first_name || null,
+          data.last_name || null,
+          data.email || null,
+          data.phone || null,
+          data.company || null,
+          data.status || 'lead',
+          JSON.stringify(customData)
+        ]);
+
+        console.log(`✅ [Webhook] Contacto actualizado: ${finalContactId}`);
+        return updateResult.rows[0];
+
+      } else {
+        // CREAR nuevo contacto
+        finalContactId = await this.generateContactId();
+
+        const insertQuery = `
+          INSERT INTO contacts (
+            contact_id, first_name, last_name, email, phone, company,
+            ext_crm_id, status, source, custom_data, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+          RETURNING contact_id, email, phone
+        `;
+
+        const insertResult = await databasePool.query(insertQuery, [
+          finalContactId,
+          data.first_name || null,
+          data.last_name || null,
+          data.email || null,
+          data.phone || null,
+          data.company || null,
+          data.contact_id, // ext_crm_id = GHL contact_id
+          data.status || 'lead',
+          'webhook',
+          JSON.stringify(customData)
+        ]);
+
+        console.log(`✅ [Webhook] Contacto creado: ${finalContactId}`);
+        return insertResult.rows[0];
       }
-
-      // NUEVO: Si viene rstk_vid, loguear para tracking
-      if (contactData.visitor_id) {
-        console.log('[Webhook] Visitor ID recibido (rstk_vid):', contactData.visitor_id);
-      }
-
-      // USAR SERVICIO DE UNIFICACIÓN INTELIGENTE
-      // Este servicio:
-      // 1. Busca duplicados por email, phone, ext_crm_id, contact_id
-      // 2. Si encuentra duplicados, los unifica sin perder información
-      // 3. Si no encuentra, crea uno nuevo
-      const unifiedContact = await contactUnificationService.findOrCreateUnified(contactData);
-
-      // NUEVO: Si hay rstk_vid, vincular con las sesiones de tracking
-      if (contactData.visitor_id && unifiedContact.contact_id) {
-        try {
-          console.log(`[Webhook → Tracking] Vinculando visitor_id ${contactData.visitor_id} con contact_id ${unifiedContact.contact_id}`);
-
-          // Actualizar TODAS las sesiones que tengan este visitor_id
-          const updateResult = await databasePool.query(
-            `UPDATE tracking.sessions
-             SET contact_id = $1
-             WHERE visitor_id = $2 AND contact_id IS NULL`,
-            [unifiedContact.contact_id, contactData.visitor_id]
-          );
-
-          console.log(`[Webhook → Tracking] ${updateResult.rowCount} sesiones vinculadas al contacto`);
-        } catch (trackingError) {
-          // No fallar el webhook si falla el tracking
-          console.error('[Webhook → Tracking] Error vinculando visitor_id:', trackingError);
-        }
-      }
-
-      // NUEVO: Si hay información de calendario/cita, guardarla en tabla appointments
-      if (data.calendar && data.calendar.appointmentId) {
-        try {
-          console.log('[Webhook → Appointments] Guardando información de cita para contacto:', unifiedContact.contact_id);
-
-          const appointmentData = {
-            ext_crm_appointment_id: data.calendar.appointmentId || data.calendar.id,
-            contact_id: unifiedContact.contact_id,
-            title: data.calendar.title || 'Cita sin título',
-            location: data.calendar.address || '',
-            start_time: data.calendar.startTime ? new Date(data.calendar.startTime).toISOString() : null,
-            end_time: data.calendar.endTime ? new Date(data.calendar.endTime).toISOString() : null,
-            status: data.calendar.status || data.calendar.appoinmentStatus || 'scheduled',
-            calendar_name: data.calendar.calendarName || '',
-            appointment_timezone: data.calendar.selectedTimezone || data.timezone || 'America/Mexico_City',
-            created_at: data.calendar.date_created ? new Date(data.calendar.date_created).toISOString() : new Date().toISOString(),
-            webhook_data: JSON.stringify(data.calendar) // Guardar todo el objeto calendar como JSONB
-          };
-
-          // Calcular duración en minutos si tenemos start y end
-          if (appointmentData.start_time && appointmentData.end_time) {
-            const start = new Date(appointmentData.start_time);
-            const end = new Date(appointmentData.end_time);
-            appointmentData.duration = Math.round((end - start) / (1000 * 60)); // Duración en minutos
-          }
-
-          // Insertar o actualizar la cita
-          const appointmentQuery = `
-            INSERT INTO appointments (
-              ext_crm_appointment_id, contact_id, title, location,
-              start_time, end_time, status, calendar_name,
-              appointment_timezone, duration, created_at, updated_at, webhook_data
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12::jsonb)
-            ON CONFLICT (ext_crm_appointment_id)
-            DO UPDATE SET
-              title = EXCLUDED.title,
-              location = EXCLUDED.location,
-              start_time = EXCLUDED.start_time,
-              end_time = EXCLUDED.end_time,
-              status = EXCLUDED.status,
-              calendar_name = EXCLUDED.calendar_name,
-              appointment_timezone = EXCLUDED.appointment_timezone,
-              duration = EXCLUDED.duration,
-              webhook_data = EXCLUDED.webhook_data,
-              updated_at = NOW()
-            RETURNING appointment_id
-          `;
-
-          const appointmentResult = await databasePool.query(appointmentQuery, [
-            appointmentData.ext_crm_appointment_id,
-            appointmentData.contact_id,
-            appointmentData.title,
-            appointmentData.location,
-            appointmentData.start_time,
-            appointmentData.end_time,
-            appointmentData.status,
-            appointmentData.calendar_name,
-            appointmentData.appointment_timezone,
-            appointmentData.duration,
-            appointmentData.created_at,
-            appointmentData.webhook_data
-          ]);
-
-          console.log('[Webhook → Appointments] Cita guardada/actualizada:', appointmentResult.rows[0]?.appointment_id);
-        } catch (appointmentError) {
-          // No fallar el webhook si falla guardar la cita
-          console.error('[Webhook → Appointments] Error guardando cita:', appointmentError);
-        }
-      }
-
-      console.log('[Webhook] Contacto procesado exitosamente:', unifiedContact.contact_id);
-
-      return unifiedContact;
     } catch (error) {
       console.error('[Webhook] Error en processContact:', error);
       throw error;
     }
   }
-  
-  // Mapeo flexible para pagos
+
+  // Mapeo flexible para pagos - CON CUSTOM DATA
   async processPayment(data) {
-    // EXTRAER DATOS DEL CUSTOMDATA PRIMERO para validación
-    const customData = data.customData || {};
-
-    // Campos requeridos - solo transaction_id y monto son customData
-    const requiredFields = [
-      { name: 'transaction_id', getValue: () => customData.transaction_id || data.transaction_id },
-      { name: 'monto', getValue: () => customData.monto || data.monto },
-      { name: 'contact_id', getValue: () => data.contact_id } // contact_id NO es customData
-    ];
-
+    // Campos requeridos básicos
+    const requiredFields = ['transaction_id', 'contact_id'];
     const missingFields = [];
 
     for (const field of requiredFields) {
-      if (!field.getValue()) {
-        missingFields.push(field.name);
+      if (!data[field]) {
+        missingFields.push(field);
       }
     }
 
@@ -189,46 +140,39 @@ class WebhookService {
       throw error;
     }
 
-    // DEBUG: Mostrar customData recibido en pagos
-    if (customData && Object.keys(customData).length > 0) {
-      console.log('[Webhook Payment] CustomData recibido:', JSON.stringify(customData));
-      console.log('[Webhook Payment] transaction_id extraído:', customData.transaction_id || data.transaction_id);
-      console.log('[Webhook Payment] monto extraído:', customData.monto || data.monto);
-    }
+    console.log('[Webhook] Procesando pago con customData:', data.transaction_id);
 
-    // NUEVO: Si viene rstk_vid, loguear para tracking
-    const visitorId = customData.rstk_vid || data.rstk_vid;
-    if (visitorId) {
-      console.log('[Webhook Payment] Visitor ID recibido (rstk_vid):', visitorId);
-    }
+    // Extraer CustomData específico para pagos: monto, transaction_id, nota
+    const customData = {};
+    if (data.monto !== undefined) customData.monto = data.monto;
+    if (data.transaction_id !== undefined) customData.transaction_id = data.transaction_id;
+    if (data.nota !== undefined) customData.nota = data.nota;
 
-    // Mapear campos del webhook a campos de la BD
-    // SOLO transaction_id y monto son customData
-    const paymentData = {
-      transaction_id: customData.transaction_id || data.transaction_id,
-      amount: parseFloat(customData.monto || data.monto) || 0, // Mapear "monto" a "amount"
-      description: data.nota || null, // nota NO es customData
-      contact_id: data.contact_id, // contact_id NO es customData
-      currency: data.currency || 'MXN',
-      status: 'completed',
-      payment_method: data.payment_method || 'unknown',
-      // Usar ISO string para garantizar UTC
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
+    console.log('[Webhook] CustomData extraído para pago:', customData);
 
     try {
+      const paymentData = {
+        transaction_id: data.transaction_id,
+        amount: parseFloat(data.amount || data.monto) || 0,
+        description: data.description || data.nota || null,
+        contact_id: data.contact_id,
+        currency: data.currency || 'MXN',
+        status: 'completed',
+        payment_method: data.payment_method || 'unknown',
+        custom_data: JSON.stringify(customData) // Guardar customData como JSON
+      };
+
       const query = `
-        INSERT INTO public.payments (
+        INSERT INTO payments (
           id, transaction_id, amount, description, contact_id,
-          currency, status, payment_method,
-          created_at, updated_at
-        ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9)
+          currency, status, payment_method, custom_data, created_at, updated_at
+        ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
         ON CONFLICT (transaction_id)
         DO UPDATE SET
           amount = EXCLUDED.amount,
           description = EXCLUDED.description,
-          updated_at = EXCLUDED.updated_at
+          custom_data = EXCLUDED.custom_data,
+          updated_at = NOW()
         RETURNING *
       `;
 
@@ -240,43 +184,18 @@ class WebhookService {
         paymentData.currency,
         paymentData.status,
         paymentData.payment_method,
-        paymentData.created_at,
-        paymentData.updated_at
+        paymentData.custom_data
       ]);
 
-      const payment = result.rows[0];
-
-      // NUEVO: Si hay rstk_vid, vincular con las sesiones de tracking
-      if (visitorId && payment.contact_id) {
-        try {
-          console.log(`[Webhook Payment → Tracking] Vinculando visitor_id ${visitorId} con contact_id ${payment.contact_id}`);
-
-          // Actualizar TODAS las sesiones que tengan este visitor_id
-          const updateResult = await databasePool.query(
-            `UPDATE tracking.sessions
-             SET contact_id = $1,
-                 orders_count = orders_count + 1,
-                 revenue_value = revenue_value + $2,
-                 last_order_id = $3
-             WHERE visitor_id = $4`,
-            [payment.contact_id, payment.amount, payment.transaction_id, visitorId]
-          );
-
-          console.log(`[Webhook Payment → Tracking] ${updateResult.rowCount} sesiones actualizadas con información de pago`);
-        } catch (trackingError) {
-          // No fallar el webhook si falla el tracking
-          console.error('[Webhook Payment → Tracking] Error vinculando visitor_id:', trackingError);
-        }
-      }
-
-      return payment;
+      console.log(`✅ [Webhook] Pago procesado con customData: ${data.transaction_id}`);
+      return result.rows[0];
     } catch (error) {
       console.error('[Webhook] Error en processPayment:', error);
       throw error;
     }
   }
-  
-  // Mapeo flexible para citas
+
+  // Mapeo flexible para citas - SIMPLIFICADO
   async processAppointment(data) {
     const requiredFields = ['contact_id'];
     const missingFields = [];
@@ -293,115 +212,75 @@ class WebhookService {
       throw error;
     }
 
+    console.log('[Webhook] Procesando appointment simple para contact_id:', data.contact_id);
+
     try {
-      console.log('[Webhook] Procesando appointment para contact_id:', data.contact_id);
+      // Buscar el contacto por ext_crm_id
+      const contactQuery = `
+        SELECT contact_id FROM contacts
+        WHERE ext_crm_id = $1
+        LIMIT 1
+      `;
+      const contactResult = await databasePool.query(contactQuery, [data.contact_id]);
 
-      // Primero verificar si el contacto existe usando unificación inteligente
-      const contactData = {
-        contact_id: data.contact_id,
-        first_name: data.first_name || null,
-        last_name: data.last_name || null,
-        email: data.email || null,
-        phone: data.phone || null,
-        ext_crm_id: data.contact_id,
-        status: 'appointment_scheduled',
-        source: 'webhook_appointment'
-      };
+      if (contactResult.rows.length === 0) {
+        throw new Error(`Contacto no encontrado para contact_id: ${data.contact_id}`);
+      }
 
-      const unifiedContact = await contactUnificationService.findOrCreateUnified(contactData);
-      console.log('[Webhook] Contacto unificado para appointment:', unifiedContact.contact_id);
+      const finalContactId = contactResult.rows[0].contact_id;
 
-      // Crear metadata con toda la información de la cita
-      const metadata = {
-        appointment_id: data.appointment_id || null,
-        title: data.title || 'Cita agendada',
-        scheduled_at: data.scheduled_at || new Date().toISOString(),
-        duration: parseInt(data.duration) || 30,
-        status: data.status || 'scheduled',
-        notes: data.notes || null,
-        location: data.location || null,
-        type: data.type || 'consultation',
-        webhook_data: data // Guardar todos los datos originales del webhook
-      };
-
-      // Usar la estructura correcta según la tabla real de appointments
+      // Crear appointment básico
       const query = `
-        INSERT INTO public.appointments (
+        INSERT INTO appointments (
           appointment_id, contact_id, title, description, location,
-          appointment_date, scheduled_at, duration, status, notes,
-          webhook_data, created_at, updated_at
+          start_time, end_time, status, created_at, updated_at
         ) VALUES (
-          gen_random_uuid()::text, $1, $2, $3, $4,
-          $5, $6, $7, $8, $9,
-          $10, NOW(), NOW()
+          gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, NOW(), NOW()
         )
-        ON CONFLICT (appointment_id) DO UPDATE SET
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          location = EXCLUDED.location,
-          appointment_date = EXCLUDED.appointment_date,
-          scheduled_at = EXCLUDED.scheduled_at,
-          duration = EXCLUDED.duration,
-          status = EXCLUDED.status,
-          notes = EXCLUDED.notes,
-          webhook_data = EXCLUDED.webhook_data,
-          updated_at = NOW()
         RETURNING *
       `;
 
-      // Procesar fecha si viene en el webhook
-      let appointmentDate = null;
-      let scheduledAt = null;
+      // Procesar fechas
+      let startTime = null;
+      let endTime = null;
 
-      if (data.scheduled_at) {
-        scheduledAt = new Date(data.scheduled_at).toISOString();
-        appointmentDate = scheduledAt; // Usar la misma fecha para ambos campos
-      } else if (data.appointment_date) {
-        appointmentDate = new Date(data.appointment_date).toISOString();
-        scheduledAt = appointmentDate;
-      } else {
-        // Si no hay fecha, usar la fecha actual en UTC
-        const now = new Date().toISOString();
-        appointmentDate = now;
-        scheduledAt = now;
+      if (data.start_time || data.scheduled_at) {
+        startTime = new Date(data.start_time || data.scheduled_at).toISOString();
+      }
+      if (data.end_time) {
+        endTime = new Date(data.end_time).toISOString();
+      } else if (startTime && data.duration) {
+        const start = new Date(startTime);
+        const end = new Date(start.getTime() + (parseInt(data.duration) * 60 * 1000));
+        endTime = end.toISOString();
       }
 
       const result = await databasePool.query(query, [
-        unifiedContact.contact_id, // $1 - contact_id unificado
-        data.title || 'Cita agendada', // $2 - title
-        data.description || null, // $3 - description
-        data.location || null, // $4 - location
-        appointmentDate, // $5 - appointment_date
-        scheduledAt, // $6 - scheduled_at
-        parseInt(data.duration) || 30, // $7 - duration
-        data.status || 'scheduled', // $8 - status
-        data.notes || null, // $9 - notes
-        JSON.stringify(data) // $10 - webhook_data (todos los datos originales)
+        finalContactId,
+        data.title || 'Cita agendada',
+        data.description || data.notes || null,
+        data.location || null,
+        startTime,
+        endTime,
+        data.status || 'scheduled'
       ]);
 
-      console.log('[Webhook] Appointment creado exitosamente');
+      console.log(`✅ [Webhook] Appointment creado para contacto: ${finalContactId}`);
       return result.rows[0];
     } catch (error) {
       console.error('[Webhook] Error en processAppointment:', error);
       throw error;
     }
   }
-  
-  // Mapeo flexible para reembolsos
+
+  // Mapeo flexible para reembolsos - CON CUSTOM DATA
   async processRefund(data) {
-    // EXTRAER DATOS DEL CUSTOMDATA PRIMERO para validación
-    const customData = data.customData || {};
-
-    // Campos requeridos - solo transaction_id es customData
-    const requiredFields = [
-      { name: 'transaction_id', getValue: () => customData.transaction_id || data.transaction_id }
-    ];
-
+    const requiredFields = ['transaction_id'];
     const missingFields = [];
 
     for (const field of requiredFields) {
-      if (!field.getValue()) {
-        missingFields.push(field.name);
+      if (!data[field]) {
+        missingFields.push(field);
       }
     }
 
@@ -411,56 +290,52 @@ class WebhookService {
       throw error;
     }
 
+    console.log('[Webhook] Procesando refund con customData:', data.transaction_id);
+
+    // Extraer CustomData específico para refunds: transaction_id
+    const customData = {};
+    if (data.transaction_id !== undefined) customData.transaction_id = data.transaction_id;
+
+    console.log('[Webhook] CustomData extraído para refund:', customData);
+
     try {
-      // DEBUG: Mostrar customData recibido en reembolsos
-      if (customData && Object.keys(customData).length > 0) {
-        console.log('[Webhook Refund] CustomData recibido:', JSON.stringify(customData));
-        console.log('[Webhook Refund] transaction_id extraído:', customData.transaction_id || data.transaction_id);
-      }
-
-      // Extraer transaction_id desde customData o fallback
-      const transactionId = customData.transaction_id || data.transaction_id;
-
-      // Buscar el pago original con validación de tenant
+      // Buscar el pago original
       const paymentQuery = `
-        SELECT * FROM public.payments
+        SELECT * FROM payments
         WHERE transaction_id = $1
       `;
-
-      const paymentResult = await databasePool.query(paymentQuery, [
-        transactionId
-      ]);
+      const paymentResult = await databasePool.query(paymentQuery, [data.transaction_id]);
 
       if (paymentResult.rows.length === 0) {
-        throw new Error(`Transacción no encontrada: ${transactionId}`);
+        throw new Error(`Transacción no encontrada: ${data.transaction_id}`);
       }
 
       const originalPayment = paymentResult.rows[0];
 
-      // Verificar que el pago no esté ya reembolsado
       if (originalPayment.status === 'refunded') {
-        throw new Error(`La transacción ${transactionId} ya fue reembolsada`);
+        throw new Error(`La transacción ${data.transaction_id} ya fue reembolsada`);
       }
 
-      // Actualizar el pago para marcarlo como reembolsado con validación de tenant
+      // Marcar como reembolsado y actualizar customData
       const updateQuery = `
-        UPDATE public.payments
+        UPDATE payments
         SET
           status = 'refunded',
           updated_at = NOW(),
-          description = COALESCE(description, '') || ' | Refund: ' || $2
+          description = COALESCE(description, '') || ' | Refunded: ' || $2,
+          custom_data = COALESCE(custom_data, '{}')::jsonb || $3::jsonb
         WHERE transaction_id = $1
         RETURNING *
       `;
 
       const reason = data.reason || 'Reembolso procesado vía webhook';
       const result = await databasePool.query(updateQuery, [
-        transactionId,
-        reason
+        data.transaction_id,
+        reason,
+        JSON.stringify(customData)
       ]);
 
-      console.log(`[Webhook] Pago ${transactionId} marcado como reembolsado`);
-
+      console.log(`✅ [Webhook] Pago reembolsado: ${data.transaction_id}`);
       return result.rows[0];
     } catch (error) {
       console.error('[Webhook] Error en processRefund:', error);

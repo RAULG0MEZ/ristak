@@ -780,107 +780,53 @@ router.post('/collect', async (req, res) => {
     }
 
     // =============================================================================
-    // MANEJO ESPECIAL DE EVENTO ghl_update - NO CREAR NUEVA SESIÓN
+    // MANEJO ESPECIAL DE EVENTO ghl_update - VINCULACIÓN SIMPLE CON _UD
     // =============================================================================
     if (data.event === 'ghl_update') {
-      console.log('🔄 [GHL UPDATE] Actualizando datos de GHL sin crear nueva sesión');
+      console.log('🔄 [GHL UPDATE] Detectado _ud de GHL');
 
-      // Solo actualizar si viene contact_id de GHL
+      // Solo procesar si viene ghl_contact_id desde _ud
       if (data.ghl_contact_id) {
         try {
-          // Primero intentar crear/unificar el contacto
-          const contactData = {
-            id: data.ghl_contact_id,
-            email: data.email,
-            phone: data.phone
-          };
+          // Buscar el contacto por ghl_contact_id
+          const contactQuery = `
+            SELECT contact_id FROM contacts
+            WHERE ext_crm_id = $1
+            LIMIT 1
+          `;
+          const contactResult = await databasePool.query(contactQuery, [data.ghl_contact_id]);
 
-          const contactUnificationService = require('../services/contact-unification.service');
-          const unifiedContact = await contactUnificationService.findOrCreateUnified(contactData);
+          if (contactResult.rows.length > 0) {
+            const contactId = contactResult.rows[0].contact_id;
 
-          if (unifiedContact && unifiedContact.contact_id) {
-            // Actualizar TODAS las sesiones del visitor con el contact_id
+            // Vincular TODAS las sesiones del visitor_id a este contacto
             const updateResult = await databasePool.query(
               `UPDATE tracking.sessions
                SET contact_id = $1
                WHERE visitor_id = $2 AND contact_id IS NULL`,
-              [unifiedContact.contact_id, visitorId]
+              [contactId, visitorId]
             );
 
-            console.log(`✅ [GHL UPDATE] ${updateResult.rowCount} sesiones actualizadas con contact_id: ${unifiedContact.contact_id}`);
+            console.log(`✅ [GHL UPDATE] ${updateResult.rowCount} sesiones vinculadas al contacto ${contactId}`);
 
-            // IMPORTANTE: También obtener datos de atribución de la primera sesión con UTMs
-            const attributionQuery = `
-              SELECT
-                utm_source,
-                utm_campaign,
-                utm_medium,
-                fbclid,
-                gclid,
-                ad_id,
-                campaign_id
-              FROM tracking.sessions
-              WHERE visitor_id = $1
-                AND (utm_source IS NOT NULL
-                     OR fbclid IS NOT NULL
-                     OR gclid IS NOT NULL
-                     OR ad_id IS NOT NULL)
-              ORDER BY created_at ASC
-              LIMIT 1
-            `;
-
-            const attrResult = await databasePool.query(attributionQuery, [visitorId]);
-
-            if (attrResult.rows.length > 0) {
-              const attr = attrResult.rows[0];
-              // Determinar rstk_adid (prioridad: ad_id > fbclid > gclid > campaign_id)
-              const rstk_adid = attr.ad_id || attr.fbclid || attr.gclid || attr.campaign_id;
-              const rstk_source = attr.utm_source;
-
-              if (rstk_adid || rstk_source) {
-                // Actualizar el contacto con datos de atribución
-                const updateContactQuery = `
-                  UPDATE contacts
-                  SET
-                    rstk_adid = COALESCE(rstk_adid, $2),
-                    rstk_source = COALESCE(rstk_source, $3),
-                    visitor_id = COALESCE(visitor_id, $4),
-                    updated_at = NOW()
-                  WHERE contact_id = $1
-                  RETURNING contact_id, rstk_adid, rstk_source
-                `;
-
-                const contactUpdateResult = await databasePool.query(
-                  updateContactQuery,
-                  [unifiedContact.contact_id, rstk_adid, rstk_source, visitorId]
-                );
-
-                if (contactUpdateResult.rows.length > 0) {
-                  const updated = contactUpdateResult.rows[0];
-                  console.log(`📊 [GHL UPDATE] Contacto actualizado con atribución first-touch:`, {
-                    contact_id: updated.contact_id,
-                    rstk_adid: updated.rstk_adid,
-                    rstk_source: updated.rstk_source
-                  });
-                }
-              }
-            }
-
-            // Si había rstk_vid en el _ud, también verificar si necesitamos hacer matching
-            if (data.rstk_vid && data.rstk_vid !== visitorId) {
-              console.log(`🔄 [GHL UPDATE] Detectado rstk_vid diferente: ${data.rstk_vid} vs ${visitorId}`);
-              // Aquí podríamos hacer matching adicional si es necesario
-            }
+            // Actualizar contacto con visitor_id si no lo tenía
+            await databasePool.query(
+              `UPDATE contacts
+               SET visitor_id = COALESCE(visitor_id, $2), updated_at = NOW()
+               WHERE contact_id = $1`,
+              [contactId, visitorId]
+            );
+          } else {
+            console.log(`⚠️ [GHL UPDATE] Contacto no encontrado para ghl_contact_id: ${data.ghl_contact_id}`);
           }
         } catch (updateError) {
-          console.error('❌ [GHL UPDATE] Error actualizando contact_id:', updateError);
+          console.error('❌ [GHL UPDATE] Error:', updateError);
         }
       }
 
-      // Devolver OK sin crear nueva sesión
       return res.json({
         success: true,
-        message: 'GHL data updated',
+        message: 'GHL update processed',
         visitor_id: visitorId
       });
     }
@@ -1269,156 +1215,10 @@ router.post('/collect', async (req, res) => {
     ]);
 
     // =============================================================================
-    // MATCHING CONTACT CON UNIFICACIÓN INTELIGENTE
+    // MATCHING ELIMINADO - SOLO SE HACE VIA _UD DE GHL
     // =============================================================================
-    // PRIORIDAD:
-    // 1. Si viene contact_id de rstk_local (nuestro sistema)
-    // 2. Si viene ghl_contact_id de _ud (fallback de GHL)
-    // 3. Si viene email o phone (cualquier fuente)
-    const hasRstkLocalData = data.contact_id && !data.ghl_contact_id; // contact_id sin ghl_contact_id = viene de rstk_local
-    const hasGhlData = data.ghl_contact_id; // viene de _ud
-    const hasContactData = data.email || data.phone;
-
-    if (hasRstkLocalData || hasGhlData || hasContactData) {
-      try {
-        const contactUnificationService = require('../services/contact-unification.service');
-        const fingerprintUnificationService = require('../services/fingerprint-unification.service');
-
-        // IMPORTANTE: Los datos de attribution están en la SESIÓN ACTUAL
-        // El flujo es:
-        // 1. Usuario llega con parámetros de campaña a página de conversión
-        // 2. Llena formulario (aquí están los datos de attribution)
-        // 3. Es redirigido a thank you page (aquí aparece el _ud pero SIN parámetros)
-        // Por eso usamos los datos de la sesión ACTUAL que tiene los parámetros
-
-        // Preparar datos para unificación inteligente
-        const contactData = {
-          // IDs
-          ghl_contact_id: data.ghl_contact_id || null,
-          ext_crm_id: data.ghl_contact_id || null,
-
-          // VISITOR ID - MUY IMPORTANTE PARA TRACKING
-          visitor_id: visitorId,
-
-          // Datos personales
-          first_name: data.first_name || data.firstName || null,
-          last_name: data.last_name || data.lastName || null,
-          email: data.email || null,
-          phone: data.phone || null,
-
-          // Attribution - USAR DATOS DE LA SESIÓN ACTUAL (donde convierte)
-          // Estos vienen de la URL con parámetros de campaña
-          rstk_adid: data.ad_id || data.fbclid || data.gclid ||
-                     data.campaign_id || null,
-          // rstk_source debe ser específicamente el utm_source (fb_ad, google_ads, etc)
-          rstk_source: data.utm_source || data.site_source_name || null,
-
-          // Metadata
-          source: data.ghl_source || data.utm_source || channel || 'Tracking',
-          status: 'lead', // El tracking siempre es lead inicial
-
-          // Datos extra que podrían venir
-          company: data.company || null,
-          full_name: data.full_name || data.name || null
-        };
-
-        console.log('[Tracking → Contact] Procesando con unificación inteligente:', {
-          email: contactData.email,
-          phone: contactData.phone,
-          ghl_id: contactData.ghl_contact_id
-        });
-
-        // USAR SERVICIO DE UNIFICACIÓN INTELIGENTE
-        // Este servicio:
-        // 1. Busca duplicados por email, phone, ext_crm_id, contact_id
-        // 2. Si encuentra duplicados, los unifica sin perder información
-        // 3. Si no encuentra, crea uno nuevo
-        // 4. Migra todas las referencias (pagos, citas, sesiones) al contacto maestro
-        const unifiedContact = await contactUnificationService.findOrCreateUnified(contactData);
-
-        if (unifiedContact && unifiedContact.contact_id) {
-          // ACTUALIZACIÓN CRÍTICA: Vinculamos TODAS las sesiones históricas del mismo visitor_id
-          // Esto permite hacer match retroactivo cuando el usuario convierte
-          const updateResult = await databasePool.query(
-            `UPDATE tracking.sessions
-             SET contact_id = $1
-             WHERE visitor_id = $2 AND contact_id IS NULL`,
-            [unifiedContact.contact_id, visitorId]
-          );
-
-          console.log(`[Tracking → Contact] ✅ ${updateResult.rowCount} sesiones históricas del visitor ${visitorId} vinculadas a contacto ${unifiedContact.contact_id}`);
-
-          // NUEVO: También actualizar el contacto con datos de atribución si no los tenía
-          // Esto es importante para que el contacto tenga rstk_adid y rstk_source
-          if (contactData.rstk_adid || contactData.rstk_source) {
-            const updateContactQuery = `
-              UPDATE contacts
-              SET
-                rstk_adid = COALESCE(rstk_adid, $2),
-                rstk_source = COALESCE(rstk_source, $3),
-                visitor_id = COALESCE(visitor_id, $4),
-                updated_at = NOW()
-              WHERE contact_id = $1
-              RETURNING contact_id, rstk_adid, rstk_source
-            `;
-
-            const contactUpdateResult = await databasePool.query(
-              updateContactQuery,
-              [
-                unifiedContact.contact_id,
-                contactData.rstk_adid,
-                contactData.rstk_source,
-                visitorId
-              ]
-            );
-
-            if (contactUpdateResult.rows.length > 0) {
-              const updated = contactUpdateResult.rows[0];
-              console.log(`[Tracking → Contact] 📊 Contacto actualizado con atribución:`, {
-                contact_id: updated.contact_id,
-                rstk_adid: updated.rstk_adid,
-                rstk_source: updated.rstk_source
-              });
-            }
-          }
-
-          // Ya no marcamos pages como "lead" - todas quedan como page_view
-
-          // También guardar en nuestro propio localStorage (rstk_local)
-          // Esto se hace en el cliente, no en el servidor
-
-          // NUEVO: Unificación probabilística por fingerprints
-          // Buscar y vincular sesiones con fingerprints similares
-          const currentSessionData = {
-            visitor_id: visitorId,
-            canvas_fingerprint: data.canvas_fp,
-            webgl_fingerprint: data.webgl_fp,
-            screen_fingerprint: data.screen_fp,
-            audio_fingerprint: data.audio_fp,
-            fonts_fingerprint: data.fonts_fp,
-            device_signature: data.device_sig,
-            ip: ip,
-            timezone: data.timezone,
-            user_agent: data.user_agent
-          };
-
-          const unificationResult = await fingerprintUnificationService.unifySessionsOnConversion(
-            unifiedContact.contact_id,
-            currentSessionData
-          );
-
-          if (unificationResult.unified > 0) {
-            console.log(`[Fingerprint Unification] ✅ ${unificationResult.unified} sesiones unificadas por fingerprint`);
-            console.log(`[Fingerprint Unification] Visitor IDs unificados: ${unificationResult.visitorIds.join(', ')}`);
-            console.log(`[Fingerprint Unification] Probabilidad: ${unificationResult.probability}%`);
-          }
-        }
-
-      } catch (matchingError) {
-        console.error('Error en matching GHL → Contact con unificación:', matchingError);
-        // No fallar el tracking si falla el matching
-      }
-    }
+    // El matching now solo se hace cuando GHL detecta el _ud y envía ghl_update
+    // Esto es más confiable que depender de formularios que pueden ser bloqueados
 
     // Devolver el contact_id si se creó/unificó uno
     // Esto permite al cliente guardarlo en rstk_local
