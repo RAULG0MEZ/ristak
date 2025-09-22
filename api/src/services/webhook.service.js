@@ -22,6 +22,9 @@ class WebhookService {
     }
 
     // Preparar datos para unificación inteligente
+    // EXTRAER DATOS DEL CUSTOMDATA PRIMERO, LUEGO FALLBACK A NIVEL RAÍZ
+    const customData = data.customData || {};
+
     const contactData = {
       contact_id: data.contact_id,
       first_name: data.first_name || null,
@@ -29,9 +32,10 @@ class WebhookService {
       email: data.email || null,
       phone: data.phone || null,
       company: data.company || null,
-      rstk_adid: data.rstk_adid || data.first_adid || null, // Acepta rstk_adid o first_adid por compatibilidad
-      rstk_source: data.rstk_source || null, // Campo para el medio donde convirtió
-      visitor_id: data.rstk_vid || null, // IMPORTANTE: Guardar el visitor_id para tracking
+      // PRIORIZAR customData, luego fallback a campos en raíz
+      rstk_adid: customData.rstk_adid || data.rstk_adid || data.first_adid || null,
+      rstk_source: customData.rstk_source || data.rstk_source || null,
+      visitor_id: customData.rstk_vid || data.rstk_vid || null, // IMPORTANTE: Guardar el visitor_id para tracking
       ext_crm_id: data.contact_id, // Usar contact_id como ext_crm_id
       status: data.status || 'lead',
       source: data.source || 'webhook'
@@ -40,9 +44,17 @@ class WebhookService {
     try {
       console.log('[Webhook] Procesando contacto con unificación inteligente:', contactData.contact_id);
 
+      // DEBUG: Mostrar customData recibido
+      if (customData && Object.keys(customData).length > 0) {
+        console.log('[Webhook] CustomData recibido:', JSON.stringify(customData));
+        console.log('[Webhook] rstk_adid extraído:', contactData.rstk_adid);
+        console.log('[Webhook] rstk_source extraído:', contactData.rstk_source);
+        console.log('[Webhook] visitor_id extraído:', contactData.visitor_id);
+      }
+
       // NUEVO: Si viene rstk_vid, loguear para tracking
-      if (data.rstk_vid) {
-        console.log('[Webhook] Visitor ID recibido (rstk_vid):', data.rstk_vid);
+      if (contactData.visitor_id) {
+        console.log('[Webhook] Visitor ID recibido (rstk_vid):', contactData.visitor_id);
       }
 
       // USAR SERVICIO DE UNIFICACIÓN INTELIGENTE
@@ -53,16 +65,16 @@ class WebhookService {
       const unifiedContact = await contactUnificationService.findOrCreateUnified(contactData);
 
       // NUEVO: Si hay rstk_vid, vincular con las sesiones de tracking
-      if (data.rstk_vid && unifiedContact.contact_id) {
+      if (contactData.visitor_id && unifiedContact.contact_id) {
         try {
-          console.log(`[Webhook → Tracking] Vinculando visitor_id ${data.rstk_vid} con contact_id ${unifiedContact.contact_id}`);
+          console.log(`[Webhook → Tracking] Vinculando visitor_id ${contactData.visitor_id} con contact_id ${unifiedContact.contact_id}`);
 
           // Actualizar TODAS las sesiones que tengan este visitor_id
           const updateResult = await databasePool.query(
             `UPDATE tracking.sessions
              SET contact_id = $1
              WHERE visitor_id = $2 AND contact_id IS NULL`,
-            [unifiedContact.contact_id, data.rstk_vid]
+            [unifiedContact.contact_id, contactData.visitor_id]
           );
 
           console.log(`[Webhook → Tracking] ${updateResult.rowCount} sesiones vinculadas al contacto`);
@@ -169,9 +181,18 @@ class WebhookService {
       throw error;
     }
 
+    // EXTRAER DATOS DEL CUSTOMDATA PRIMERO, LUEGO FALLBACK A NIVEL RAÍZ
+    const customData = data.customData || {};
+
+    // DEBUG: Mostrar customData recibido en pagos
+    if (customData && Object.keys(customData).length > 0) {
+      console.log('[Webhook Payment] CustomData recibido:', JSON.stringify(customData));
+    }
+
     // NUEVO: Si viene rstk_vid, loguear para tracking
-    if (data.rstk_vid) {
-      console.log('[Webhook Payment] Visitor ID recibido (rstk_vid):', data.rstk_vid);
+    const visitorId = customData.rstk_vid || data.rstk_vid;
+    if (visitorId) {
+      console.log('[Webhook Payment] Visitor ID recibido (rstk_vid):', visitorId);
     }
 
     // Mapear campos del webhook a campos de la BD
