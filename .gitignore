@@ -11,9 +11,12 @@ node_modules
 dist
 dist-ssr
 
-# === CONFIGURACIÓN MODIFICADA ===
-# Usuario solicitó que TODO se suba al repo incluyendo .env y credenciales
-# Se removieron todas las protecciones de seguridad por solicitud explícita
+# === CONFIGURACIÓN DE SEGURIDAD ===
+# NUNCA subir archivos con contraseñas/credenciales
+.env.local
+.env.*.local
+api/.env
+api/.env.local
 
 # Editor directories and files
 .vscode/*

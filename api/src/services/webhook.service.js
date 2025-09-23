@@ -299,7 +299,7 @@ class WebhookService {
     }
   }
 
-  // Mapeo flexible para citas - SIMPLIFICADO
+  // Mapeo completo para citas - GUARDA TODOS LOS CAMPOS RELEVANTES
   async processAppointment(data) {
     const requiredFields = ['contact_id'];
     const missingFields = [];
@@ -316,10 +316,11 @@ class WebhookService {
       throw error;
     }
 
-    console.log('[Webhook] Procesando appointment simple para contact_id:', data.contact_id);
+    console.log('[Webhook] Procesando appointment completo para contact_id:', data.contact_id);
 
     try {
-      // Buscar el contacto por ext_crm_id
+      // Buscar el contacto por ext_crm_id, si no existe lo creamos
+      let finalContactId;
       const contactQuery = `
         SELECT contact_id FROM contacts
         WHERE ext_crm_id = $1
@@ -328,30 +329,63 @@ class WebhookService {
       const contactResult = await databasePool.query(contactQuery, [data.contact_id]);
 
       if (contactResult.rows.length === 0) {
-        throw new Error(`Contacto no encontrado para contact_id: ${data.contact_id}`);
+        // Crear contacto si no existe
+        console.log(`[Webhook] Contacto no existe, creando nuevo para ext_crm_id: ${data.contact_id}`);
+        finalContactId = await this.generateContactId();
+
+        const insertContactQuery = `
+          INSERT INTO contacts (
+            contact_id, ext_crm_id, status, source, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, NOW(), NOW())
+          RETURNING contact_id
+        `;
+
+        const newContactResult = await databasePool.query(insertContactQuery, [
+          finalContactId,
+          data.contact_id, // ext_crm_id = GHL contact_id
+          'lead',
+          'webhook'
+        ]);
+
+        console.log(`✅ [Webhook] Contacto creado: ${finalContactId}`);
+      } else {
+        finalContactId = contactResult.rows[0].contact_id;
+        console.log(`[Webhook] Usando contacto existente: ${finalContactId}`);
       }
 
-      const finalContactId = contactResult.rows[0].contact_id;
+      // Extraer datos del appointment object si viene anidado
+      const appointmentData = data.appointment || data;
 
-      // Crear appointment básico
+      // Crear appointment completo con TODOS los campos relevantes
       const query = `
         INSERT INTO appointments (
           appointment_id, contact_id, title, description, location,
-          start_time, end_time, status, created_at, updated_at
+          start_time, end_time, appointment_date, status,
+          ext_crm_appointment_id, calendar_name, notes,
+          created_at, updated_at
         ) VALUES (
-          gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, NOW(), NOW()
+          gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW()
         )
         RETURNING *
       `;
 
-      // Procesar fechas
+      // Procesar fechas del appointment object
       let startTime = null;
       let endTime = null;
+      let appointmentDate = null;
 
-      if (data.start_time || data.scheduled_at) {
+      // Priorizar campos del appointment object
+      if (appointmentData.startTime) {
+        startTime = new Date(appointmentData.startTime).toISOString();
+        appointmentDate = startTime; // usar start_time como appointment_date también
+      } else if (data.start_time || data.scheduled_at) {
         startTime = new Date(data.start_time || data.scheduled_at).toISOString();
+        appointmentDate = startTime;
       }
-      if (data.end_time) {
+
+      if (appointmentData.endTime) {
+        endTime = new Date(appointmentData.endTime).toISOString();
+      } else if (data.end_time) {
         endTime = new Date(data.end_time).toISOString();
       } else if (startTime && data.duration) {
         const start = new Date(startTime);
@@ -360,16 +394,23 @@ class WebhookService {
       }
 
       const result = await databasePool.query(query, [
-        finalContactId,
-        data.title || 'Cita agendada',
-        data.description || data.notes || null,
-        data.location || null,
-        startTime,
-        endTime,
-        data.status || 'scheduled'
+        finalContactId,                                    // $1: contact_id (nuestro ID interno)
+        appointmentData.title || data.title || 'Cita agendada',  // $2: title
+        appointmentData.notes || data.description || data.notes || null,  // $3: description
+        appointmentData.address || data.location || null, // $4: location
+        startTime,                                         // $5: start_time
+        endTime,                                          // $6: end_time
+        appointmentDate,                                  // $7: appointment_date
+        appointmentData.status || data.status || 'scheduled',  // $8: status
+        appointmentData.appointmentId || appointmentData.id || null,  // $9: ext_crm_appointment_id (ID de GHL)
+        appointmentData.calendarName || null,             // $10: calendar_name
+        appointmentData.notes || null                     // $11: notes
       ]);
 
-      console.log(`✅ [Webhook] Appointment creado para contacto: ${finalContactId}`);
+      console.log(`✅ [Webhook] Appointment completo creado para contacto: ${finalContactId}`);
+      console.log(`📅 [Webhook] Appointment ID externo: ${appointmentData.appointmentId || appointmentData.id}`);
+      console.log(`📋 [Webhook] Calendario: ${appointmentData.calendarName || 'N/A'}`);
+
       return result.rows[0];
     } catch (error) {
       console.error('[Webhook] Error en processAppointment:', error);

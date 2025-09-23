@@ -1850,7 +1850,7 @@ export function Analytics() {
                     }
                   </Geographies>
 
-                  {/* Marcadores para países o ciudades principales */}
+                  {/* Marcadores para países o ciudades principales - sin números, solo puntos */}
                   {locationData?.locations?.map((location: any, index: number) => {
                     // Solo mostrar marcadores si tenemos coordenadas
                     if (location.lat && location.lng) {
@@ -1859,25 +1859,60 @@ export function Analytics() {
                           key={index}
                           coordinates={[location.lng, location.lat]}
                         >
-                          <circle
-                            r={Math.max(3, Math.min(10, Math.sqrt(location.visitors) * 2))}
-                            fill="#ef4444"
-                            fillOpacity={0.7}
-                            stroke="#ffffff"
-                            strokeWidth={1}
-                          />
-                          <text
-                            textAnchor="middle"
-                            y={-10}
-                            style={{
-                              fontSize: '10px',
-                              fill: '#ffffff',
-                              fontWeight: 'bold',
-                              textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                          <g
+                            onMouseEnter={(e) => {
+                              // Crear tooltip al hacer hover
+                              const tooltip = document.getElementById('map-tooltip')
+                              if (tooltip) {
+                                tooltip.innerHTML = `
+                                  <div class="glass rounded-lg p-3 shadow-xl backdrop-blur-sm">
+                                    <p class="text-sm font-semibold text-primary">${location.state || location.country}</p>
+                                    <p class="text-xs text-secondary mt-1">${location.visitors} visitantes</p>
+                                    ${location.cities?.length > 0 ? `
+                                      <p class="text-xs text-tertiary mt-1">
+                                        ${location.cities.slice(0, 3).join(', ')}
+                                        ${location.cities.length > 3 ? ` +${location.cities.length - 3} más` : ''}
+                                      </p>
+                                    ` : ''}
+                                  </div>
+                                `
+                                tooltip.style.display = 'block'
+                                tooltip.style.left = `${e.clientX + 10}px`
+                                tooltip.style.top = `${e.clientY - 40}px`
+                              }
                             }}
+                            onMouseMove={(e) => {
+                              const tooltip = document.getElementById('map-tooltip')
+                              if (tooltip) {
+                                tooltip.style.left = `${e.clientX + 10}px`
+                                tooltip.style.top = `${e.clientY - 40}px`
+                              }
+                            }}
+                            onMouseLeave={() => {
+                              const tooltip = document.getElementById('map-tooltip')
+                              if (tooltip) {
+                                tooltip.style.display = 'none'
+                              }
+                            }}
+                            style={{ cursor: 'pointer' }}
                           >
-                            {location.visitors}
-                          </text>
+                            {/* Círculo exterior con animación de pulso */}
+                            <circle
+                              r={Math.max(5, Math.min(15, Math.sqrt(location.visitors) * 3))}
+                              fill="#ef4444"
+                              fillOpacity={0.2}
+                              className="animate-ping"
+                            />
+                            {/* Círculo principal */}
+                            <circle
+                              r={Math.max(3, Math.min(10, Math.sqrt(location.visitors) * 2))}
+                              fill="#ef4444"
+                              fillOpacity={0.8}
+                              stroke="#ffffff"
+                              strokeWidth={1.5}
+                              className="transition-all duration-200 hover:fillOpacity-100"
+                            />
+                          </g>
                         </Marker>
                       )
                     }
@@ -1886,6 +1921,12 @@ export function Analytics() {
                 </ZoomableGroup>
               </ComposableMap>
             </div>
+            {/* Contenedor del tooltip flotante para el mapa */}
+            <div
+              id="map-tooltip"
+              className="fixed z-50 pointer-events-none transition-opacity duration-200"
+              style={{ display: 'none' }}
+            />
           </Card>
 
           {/* Lista de Ubicaciones - ocupa 1 columna */}
