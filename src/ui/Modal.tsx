@@ -36,11 +36,15 @@ export function Modal({
     <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999]"
       style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
-      onClick={onClose}
+      onClick={(e) => {
+        // Solo cerrar si clickeas directamente en el overlay, no en el contenido
+        if (e.target === e.currentTarget) {
+          onClose()
+        }
+      }}
     >
       <div
         className={`bg-secondary dark:glass rounded-xl border border-primary shadow-2xl ${sizeClasses[size]} w-full mx-4 max-h-[90vh] overflow-y-auto ${className}`}
-        onClick={(e) => e.stopPropagation()}
       >
         {(title || showCloseButton) && (
           <div className="flex items-center justify-between p-6 border-b border-primary">
