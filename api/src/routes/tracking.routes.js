@@ -603,17 +603,37 @@ return Math.abs(hash).toString(36)+Math.abs(hash2).toString(36);
 var getDeviceOnlyFp=function(){
 try{
 var components=[
-screen.width+'x'+screen.height, // Resolución
-screen.colorDepth, // Profundidad de color
-screen.pixelDepth||screen.colorDepth,
+// Pantalla - agregar más detalles
+screen.width+'x'+screen.height+'x'+(screen.availWidth)+'x'+(screen.availHeight), // Resolución + área disponible
+screen.colorDepth+'_'+screen.pixelDepth, // Profundidades de color
 window.devicePixelRatio||1, // DPI
+// Hardware
 navigator.hardwareConcurrency||0, // CPU cores
-navigator.deviceMemory||0, // RAM (si está disponible)
-navigator.maxTouchPoints||0, // Touch support
-// WebGL renderer (GPU)
+navigator.deviceMemory||0, // RAM
+navigator.maxTouchPoints||0, // Touch
+// GPU - MÁS IMPORTANTE para unicidad
 getWebGLFp(),
-// Audio hardware
-getAudioFp()
+// WebGL vendor y renderer detallado
+(function(){
+  try{
+    var canvas=document.createElement('canvas');
+    var gl=canvas.getContext('webgl')||canvas.getContext('experimental-webgl');
+    if(!gl)return null;
+    var debugInfo=gl.getExtension('WEBGL_debug_renderer_info');
+    if(!debugInfo)return null;
+    return gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)+'|'+gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+  }catch(e){return null}
+})(),
+// Audio - único por hardware
+getAudioFp(),
+// MediaDevices - cámaras y micrófonos
+(navigator.mediaDevices&&navigator.mediaDevices.enumerateDevices?'media':'nomedia'),
+// Battery API si existe
+(navigator.getBattery?'battery':'nobattery'),
+// Conexión
+(navigator.connection?navigator.connection.effectiveType:'noconn'),
+// Plugins count (para detectar extensiones)
+navigator.plugins.length
 ].filter(Boolean);
 return simpleHash(components.join('|'));
 }catch(e){return null}
