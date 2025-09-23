@@ -168,8 +168,8 @@ if(existingVid){
 }
 // IMPORTANTE: Sincronizar visitor_id en TODOS los storages (agnóstico: guardar en todos lados)
 a.setItem("rstk_local",JSON.stringify(rstkLocal));
-setCookie("rstk_vid",rstkLocal.visitor_id,365); // Cookie de 1 año
-setCookie("rstk_visitor",rstkLocal.visitor_id,365); // Cookie backup con otro nombre
+setCookie("rstk_vid",rstkLocal.visitor_id,3650); // Cookie de 10 años (prácticamente permanente)
+setCookie("rstk_visitor",rstkLocal.visitor_id,3650); // Cookie backup con otro nombre
 // Manejar sesiones
 var lastActivity=rstkLocal.last_activity?new Date(rstkLocal.last_activity).getTime():0;
 var sessionId=s.getItem("rstk_session_id");
@@ -885,8 +885,8 @@ rstkLocal.ghl_detected=true;
 rstkLocal.ghl_detected_at=new Date().toISOString();
 a.setItem("rstk_local",JSON.stringify(rstkLocal));
 // SINCRONIZAR: También guardar en cookies (agnóstico: backup en cookies)
-setCookie("rstk_vid",rstkLocal.visitor_id,365);
-if(rstkLocal.contact_id){setCookie("rstk_cid",rstkLocal.contact_id,365)}
+setCookie("rstk_vid",rstkLocal.visitor_id,3650);
+if(rstkLocal.contact_id){setCookie("rstk_contact_id",rstkLocal.contact_id,3650)} // Usar nombre consistente
 // Enviar actualización al backend SIN crear nueva sesión
 var updateData={
 sid:e,vid:u,sess:g,
@@ -913,7 +913,7 @@ fetch(x,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.str
     rstkLocal.contact_id_internal = true;
     a.setItem("rstk_local",JSON.stringify(rstkLocal));
     // SINCRONIZAR: También guardar contact_id en cookie (agnóstico: persistencia máxima)
-    setCookie("rstk_cid",response.contact_id,365);
+    setCookie("rstk_contact_id",response.contact_id,3650); // Cookie permanente
   }
 })
 .catch(function(e){console.log("[HT] ⚠️ Error actualizando GHL:",e)});
@@ -957,8 +957,8 @@ if(o.gclid){rstkLocal.gclid=o.gclid}
 // Guardar todo actualizado
 a.setItem("rstk_local",JSON.stringify(rstkLocal));
 // SINCRONIZAR: También guardar en cookies (agnóstico: máxima persistencia wey)
-setCookie("rstk_cid",data.contact_id,365);
-setCookie("rstk_vid",rstkLocal.visitor_id,365);
+setCookie("rstk_contact_id",data.contact_id,3650); // Nombre consistente
+setCookie("rstk_vid",rstkLocal.visitor_id,3650);
 // Lead convertido, rstk_local actualizado
 }}).catch(function(){})}}))
 .catch((function(e){
@@ -987,6 +987,32 @@ addEventListener("popstate",trackIfChanged)}();`;
 router.post('/collect', async (req, res) => {
   try {
     const data = req.body || {};
+
+    // NUEVO: Leer cookies como fallback para visitor_id y contact_id
+    const cookies = req.headers.cookie || '';
+    const getCookieValue = (name) => {
+      const match = cookies.match(new RegExp(`${name}=([^;]+)`));
+      return match ? match[1] : null;
+    };
+
+    // Si no viene visitor_id en data, intentar recuperarlo de cookies
+    if (!data.vid && cookies) {
+      const cookieVid = getCookieValue('rstk_vid') || getCookieValue('rstk_visitor');
+      if (cookieVid) {
+        console.log('🍪 [COOKIE] Visitor_id recuperado de cookie:', cookieVid);
+        data.vid = cookieVid; // Usar el de la cookie como fallback
+      }
+    }
+
+    // Si no viene contact_id en data, intentar recuperarlo de cookies
+    if (!data.contact_id && cookies) {
+      const cookieContactId = getCookieValue('rstk_contact_id') || getCookieValue('rstk_cid'); // Soportar ambos nombres por compatibilidad
+      if (cookieContactId) {
+        console.log('🍪 [COOKIE] Contact_id recuperado de cookie:', cookieContactId);
+        data.contact_id = cookieContactId; // Usar el de la cookie como fallback
+      }
+    }
+
     const trackingHostname = extractTrackingHostname(req);
     const forwardedHostHeader = req.headers['x-forwarded-host'] || null;
     const originalHostHeader = req.headers['x-original-host'] || null;
