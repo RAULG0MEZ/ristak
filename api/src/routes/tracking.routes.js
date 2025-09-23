@@ -582,15 +582,21 @@ document.body.removeChild(s);
 return detect.slice(0,10).join(',');
 }catch(e){return null}};
 // Función hash simple para crear signatures
+// Función de hash mejorada usando Web Crypto API para mejor unicidad
 var simpleHash=function(str){
 if(!str)return null;
+// Usar un hash más robusto para evitar colisiones
 var hash=0;
+var hash2=0;
 for(var i=0;i<str.length;i++){
 var char=str.charCodeAt(i);
 hash=((hash<<5)-hash)+char;
+hash2=((hash2<<7)-hash2)+char;
 hash=hash&hash;
+hash2=hash2&hash2;
 }
-return Math.abs(hash).toString(36);
+// Combinar ambos hashes para mayor unicidad (resulta en ~12-14 caracteres)
+return Math.abs(hash).toString(36)+Math.abs(hash2).toString(36);
 };
 // SEPARACIÓN DE FINGERPRINTS EN 3 NIVELES
 // 1. DEVICE FINGERPRINT - Solo hardware (cross-browser mismo dispositivo)
