@@ -1829,13 +1829,12 @@ router.post('/collect', async (req, res) => {
     // Si tenemos un device fingerprint con buena confianza, buscar otros visitors
     if (deviceFingerprint && deviceConfidence >= 70) {
       try {
-        // Buscar todas las sesiones con el mismo device fingerprint
+        // Buscar TODAS las sesiones con el mismo device fingerprint (sin límite de tiempo)
         const fingerprintQuery = `
           SELECT DISTINCT visitor_id, contact_id, created_at
           FROM tracking.sessions
           WHERE device_fingerprint = $1
           AND visitor_id != $2
-          AND created_at > NOW() - INTERVAL '30 days'
           ORDER BY created_at ASC
         `;
 
