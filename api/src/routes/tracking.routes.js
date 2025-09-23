@@ -644,22 +644,50 @@ try{
 var components=[
 navigator.userAgent,
 navigator.language,
+navigator.languages?navigator.languages.join(','):'', // Todos los idiomas
 navigator.platform,
 Intl.DateTimeFormat().resolvedOptions().timeZone,
 new Date().getTimezoneOffset(),
-getCanvasFp(), // Canvas rendering es específico del browser
+// Canvas - IMPORTANTE: usar solo hash, no el dataURL completo
+getCanvasFp()?simpleHash(getCanvasFp()):'', // Hash del canvas para unicidad
 getFontsFp(), // Fonts instaladas
+// Más propiedades del navegador
 navigator.cookieEnabled,
 window.sessionStorage?'1':'0',
-window.localStorage?'1':'0'
-].filter(Boolean);
+window.localStorage?'1':'0',
+window.indexedDB?'1':'0',
+// Permisos y APIs
+(navigator.permissions?'perms':'noperms'),
+(window.Notification?'notif':'nonotif'),
+(navigator.webdriver||false), // Detecta automation
+// Resolución y color únicos del browser
+window.outerWidth+'x'+window.outerHeight, // Tamaño de ventana
+window.screenX+'x'+window.screenY, // Posición de ventana
+navigator.doNotTrack||'unspecified',
+// Historia y performance
+window.history.length, // Longitud del historial
+performance.navigation.type // Tipo de navegación
+].filter(function(v){return v!==null&&v!==undefined}).map(String);
 return simpleHash(components.join('|'));
 }catch(e){return null}
 };
 // 3. COMBINED FINGERPRINT - Todo junto (máxima unicidad)
 var getCombinedFp=function(deviceFp,browserFp){
 if(!deviceFp&&!browserFp)return null;
-return simpleHash((deviceFp||'')+'+'+(browserFp||''));
+// Incluir más componentes únicos en el combined
+var extraComponents=[
+deviceFp||'',
+browserFp||'',
+// Timestamp de instalación (primera visita)
+rstkLocal.first_visit||Date.now(),
+// Canvas hash directo para máxima unicidad
+getCanvasFp()?simpleHash(getCanvasFp().substring(0,500)):'',
+// Audio fingerprint
+getAudioFp()?simpleHash(getAudioFp()):'',
+// WebGL completo
+getWebGLFp()||''
+].filter(Boolean);
+return simpleHash(extraComponents.join('|'));
 };
 // Calcular los 3 fingerprints
 var deviceFp=getDeviceOnlyFp();
