@@ -149,17 +149,18 @@ app.listen(PORT, () => {
   console.log(`📥 Import API: http://localhost:${PORT}/api/import`);
   console.log(`🚀 Deploy API: http://localhost:${PORT}/api/deploy`);
 
-  // Iniciar cron job de sincronización con Cloudflare (solo en producción)
-  if (process.env.NODE_ENV === 'production') {
-    try {
-      const trackingSyncJob = require('./jobs/tracking-sync.job');
-      trackingSyncJob.start();
-    } catch (error) {
-      console.error('⚠️ Could not start tracking sync job:', error.message);
-    }
-  } else {
-    console.log('ℹ️ Tracking sync cron job disabled (development mode)');
-  }
+  // DESHABILITADO: Job de Cloudflare ya no se usa
+  // if (process.env.NODE_ENV === 'production') {
+  //   try {
+  //     const trackingSyncJob = require('./jobs/tracking-sync.job');
+  //     trackingSyncJob.start();
+  //   } catch (error) {
+  //     console.error('⚠️ Could not start tracking sync job:', error.message);
+  //   }
+  // } else {
+  //   console.log('ℹ️ Tracking sync cron job disabled (development mode)');
+  // }
+  console.log('ℹ️ Cloudflare tracking sync job disabled (no longer needed)');
 
   // JOB RETROACTIVO ELIMINADO - Ahora solo usamos _ud de GHL
   console.log('ℹ️ Contact tracking link job disabled (now using _ud only)');

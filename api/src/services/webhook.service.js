@@ -84,6 +84,13 @@ class WebhookService {
         ]);
 
         console.log(`✅ [Webhook] Contacto actualizado: ${finalContactId}`);
+
+        // NUEVO: Vincular sesiones de tracking si tenemos visitor_id
+        const visitorId = data.rstk_vid || customData.rstk_vid;
+        if (visitorId) {
+          await this.linkTrackingSessions(finalContactId, visitorId);
+        }
+
         return updateResult.rows[0];
 
       } else {
@@ -111,11 +118,100 @@ class WebhookService {
         ]);
 
         console.log(`✅ [Webhook] Contacto creado: ${finalContactId}`);
+
+        // NUEVO: Vincular sesiones de tracking si tenemos visitor_id
+        const visitorId = data.rstk_vid || customData.rstk_vid;
+        if (visitorId) {
+          await this.linkTrackingSessions(finalContactId, visitorId);
+        }
+
         return insertResult.rows[0];
       }
     } catch (error) {
       console.error('[Webhook] Error en processContact:', error);
       throw error;
+    }
+  }
+
+  // NUEVO: Función para vincular sesiones de tracking con locks para evitar race conditions
+  async linkTrackingSessions(contactId, visitorId) {
+    console.log(`🔗 [Webhook] Intentando vincular sesiones del visitor ${visitorId} al contacto ${contactId}`);
+
+    try {
+      // Primero verificar si hay sesiones de este visitor
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM tracking.sessions
+        WHERE visitor_id = $1
+      `;
+      const countResult = await databasePool.query(countQuery, [visitorId]);
+      console.log(`📊 [Webhook] Sesiones encontradas para visitor ${visitorId}: ${countResult.rows[0].total}`);
+
+      // Generar hash único para el lock basado en visitor_id + contact_id
+      const lockKey = `${visitorId}_${contactId}`;
+      const hash = require('crypto').createHash('md5').update(lockKey).digest('hex');
+      const lockId = parseInt(hash.substring(0, 8), 16);
+
+      // Intentar obtener lock advisory de PostgreSQL
+      const lockResult = await databasePool.query('SELECT pg_try_advisory_lock($1)', [lockId]);
+
+      if (!lockResult.rows[0].pg_try_advisory_lock) {
+        console.log('⏳ [Webhook] Lock en uso, otro proceso está vinculando. Saltando...');
+        return 0;
+      }
+
+      try {
+        // Verificar si ya existe vinculación
+        const checkQuery = `
+          SELECT COUNT(*) as linked
+          FROM tracking.sessions
+          WHERE visitor_id = $1 AND contact_id = $2
+          LIMIT 1
+        `;
+        const checkResult = await databasePool.query(checkQuery, [visitorId, contactId]);
+
+        if (checkResult.rows[0].linked > 0) {
+          console.log('✓ [Webhook] Sesiones ya vinculadas previamente');
+          return 0;
+        }
+
+        // Vincular todas las sesiones del visitor_id al contact_id
+        const updateQuery = `
+          UPDATE tracking.sessions
+          SET
+            contact_id = $1,
+            updated_at = NOW()
+          WHERE
+            visitor_id = $2
+            AND contact_id IS NULL
+        `;
+        const updateResult = await databasePool.query(updateQuery, [contactId, visitorId]);
+
+        if (updateResult.rowCount > 0) {
+          console.log(`✅ [Webhook] ${updateResult.rowCount} sesiones vinculadas INMEDIATAMENTE por webhook`);
+
+          // También actualizar el visitor_id en el contacto si no lo tiene
+          await databasePool.query(
+            `UPDATE contacts
+             SET visitor_id = COALESCE(visitor_id, $2), updated_at = NOW()
+             WHERE contact_id = $1`,
+            [contactId, visitorId]
+          );
+        } else {
+          console.log('ℹ️ [Webhook] No hay sesiones pendientes de vincular');
+        }
+
+        return updateResult.rowCount;
+
+      } finally {
+        // Siempre liberar el lock
+        await databasePool.query('SELECT pg_advisory_unlock($1)', [lockId]);
+      }
+
+    } catch (error) {
+      console.error('❌ [Webhook] Error vinculando sesiones:', error);
+      // No lanzar error para no romper el flujo principal
+      return 0;
     }
   }
 

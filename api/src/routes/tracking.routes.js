@@ -152,15 +152,8 @@ a.setItem("rstk_local",JSON.stringify(rstkLocal));
 // Variables para el resto del script
 var u=rstkLocal.visitor_id,g=sessionId,m=rstkLocal.session_count;
 var y=document.currentScript||document.querySelector('script[src*="snip.js"]'),w=((y?y.src:t+"/snip.js").split("?")[0]||"").replace(/\\/snip\\.js$/,""),x=(w||t)+"/collect";
-console.group("[HT] 🚀 Tracking Inicializado");
-console.log("📍 Domain:",location.hostname);
-console.log("🆔 Visitor ID:",u);
-console.log("🔗 Session ID:",g);
-console.log("#️⃣ Session Number:",m);
-console.log("🎯 Subaccount:",e);
-console.log("🌐 Tracking Host:",t);
-console.log("🛰 Endpoint:",x);
-console.groupEnd();
+// Solo un log simple de inicialización
+console.log("[HT] Tracking activo:",u);
 // NUEVO: Función para agregar rstk_vid a URLs
 var addVidToUrl=function(url){
 try{
@@ -221,7 +214,7 @@ var currentUrl=new URL(location.href);
 if(!currentUrl.searchParams.has('rstk_vid')){
 currentUrl.searchParams.set('rstk_vid',u);
 history.replaceState(null,'',currentUrl.toString());
-console.log("[HT] 📍 URL actual actualizada con rstk_vid:",u);
+// Quitado log de URL actualizada
 }
 }catch(e){}
 }
@@ -235,7 +228,7 @@ if(linkUrl.hostname===location.hostname||linkUrl.hostname.includes('ghl')||linkU
 if(!linkUrl.searchParams.has('rstk_vid')){
 linkUrl.searchParams.set('rstk_vid',u);
 link.href=linkUrl.toString();
-console.log("[HT] 🔗 Link actualizado con rstk_vid:",link.href.substring(0,50)+'...');
+// Quitado log de links actualizados
 }
 }
 }catch(e){}
@@ -248,7 +241,7 @@ var iframeSrc=new URL(iframe.src,location.href);
 if(!iframeSrc.searchParams.has('rstk_vid')){
 iframeSrc.searchParams.set('rstk_vid',u);
 iframe.src=iframeSrc.toString();
-console.log("[HT] 📦 Iframe actualizado con rstk_vid");
+// Quitado log de iframe
 }
 }catch(e){}
 });
@@ -258,17 +251,16 @@ var urlAttempts=0;
 var urlInterval=setInterval(function(){
 urlAttempts++;
 injectRstkVidToUrls();
-console.log("[HT] 🔄 Intento",urlAttempts,"de inyección en URLs");
+// Quitados logs de intentos de URLs
 if(urlAttempts>=15){// 15 intentos = 45 segundos total
 clearInterval(urlInterval);
-console.log("[HT] ✅ Finalizados intentos de inyección en URLs (45 segundos cubiertos)");
 }
 },3000);// Cada 3 segundos
 // Ejecutar inmediatamente
 injectRstkVidToUrls();
 // MEJORADO: Inyectar rstk_vid en TODOS los formularios (incluso GHL)
 var injectRstkVidToForms=function(){
-console.log("[HT] 🔍 Buscando formularios para inyectar rstk_vid:",u);
+// Quitado log de búsqueda de formularios
 // 1. Buscar TODOS los forms en la página
 var allForms=document.querySelectorAll('form');
 allForms.forEach(function(form){
@@ -281,7 +273,7 @@ hiddenInput.type='hidden';
 hiddenInput.name='rstk_vid';
 hiddenInput.value=u;
 form.appendChild(hiddenInput);
-console.log("[HT] 💉 Inyectado rstk_vid en formulario:",form.id||form.className||'sin-id');
+// Quitado log de inyección en formulario
 }
 });
 // 2. Buscar inputs específicos de GHL y popular
@@ -296,7 +288,7 @@ if(name.includes('rstk')||name.includes('visitor')||name.includes('tracking')||
    dataField.includes('rstk')||dataField.includes('visitor')){
 if(!input.value||input.value===''){
 input.value=u;
-console.log("[HT] 🎯 Input GHL populado:",input.name||input.id);
+// Quitado log de input GHL
 // Disparar eventos para que GHL detecte el cambio
 input.dispatchEvent(new Event('input',{bubbles:true}));
 input.dispatchEvent(new Event('change',{bubbles:true}));
@@ -309,7 +301,7 @@ var rstkInputs=document.querySelectorAll('input[name="rstk_vid"], input[data-nam
 rstkInputs.forEach(function(input){
 if(!input.value||input.value===''){
 input.value=u;
-console.log("[HT] 🎯 Input rstk_vid directo populado");
+// Quitado log de input rstk_vid
 input.dispatchEvent(new Event('input',{bubbles:true}));
 input.dispatchEvent(new Event('change',{bubbles:true}));
 }
@@ -321,7 +313,7 @@ try{
 var actionUrl=new URL(form.action,location.href);
 actionUrl.searchParams.set('rstk_vid',u);
 form.action=actionUrl.toString();
-console.log("[HT] 🔗 Action URL actualizada con rstk_vid");
+// Quitado log de action URL
 }catch(e){}
 }
 });
@@ -332,10 +324,9 @@ var maxAttempts=15;
 var injectInterval=setInterval(function(){
 attemptCount++;
 injectRstkVidToForms();
-console.log("[HT] 📝 Intento",attemptCount,"de inyección en formularios");
+// Quitados logs de intentos de formularios
 if(attemptCount>=maxAttempts){
 clearInterval(injectInterval);
-console.log("[HT] ✅ Finalizados intentos de inyección en formularios (45 segundos cubiertos)");
 }
 },3000); // Cada 3 segundos por 15 veces = 45 segundos
 // También ejecutar inmediatamente
@@ -354,7 +345,7 @@ node.tagName==='IFRAME'||
 });
 });
 if(hasNewElements){
-console.log("[HT] 🆕 Detectados nuevos elementos dinámicos, inyectando rstk_vid");
+// Quitado log de nuevos elementos
 setTimeout(function(){
 injectRstkVidToForms();
 injectRstkVidToUrls();
@@ -458,14 +449,7 @@ audio:getAudioFp(),
 fonts:getFontsFp()
 };
 var deviceSig=genDeviceSig(fps);
-console.group('[HT] 🔐 Device Fingerprints');
-console.log('🎨 Canvas:',fps.canvas?fps.canvas.substring(0,30)+'...':'null');
-console.log('🎮 WebGL:',fps.webgl||'null');
-console.log('📺 Screen:',fps.screen);
-console.log('🔊 Audio:',fps.audio?'captured':'null');
-console.log('📝 Fonts:',fps.fonts?fps.fonts.split(',').length+' fonts detected':'null');
-console.log('🔑 Device Signature:',deviceSig||'null');
-console.groupEnd();
+// Quitados todos los logs de fingerprints
 var f=function(n){
 var o={
 // Identificadores principales
@@ -562,7 +546,7 @@ channel:c("channel")
 // Intentar obtener datos del usuario guardados (GHL y nuestro rstk_local)
 // Primero intentar con nuestro rstk_local (tiene prioridad)
 try{if(rstkLocal&&Object.keys(rstkLocal).length>0){
-console.log("[HT] 🔑 rstk_local detectado:",rstkLocal);
+// Quitado log de rstk_local
 o.contact_id=rstkLocal.contact_id,
 o.rstk_adid=rstkLocal.rstk_adid,
 o.rstk_source=rstkLocal.rstk_source,
@@ -580,7 +564,7 @@ try{
 var r=a.getItem("_ud");
 if(r){
 ghlUserData=JSON.parse(r);
-console.log("[HT] 🔐 _ud de GHL detectado:",ghlUserData);
+// Quitado log de _ud detectado
 return true;
 }
 }catch(e){}
@@ -621,7 +605,7 @@ ghlUserData.site_source_name&&!o.site_source_name&&(o.site_source_name=ghlUserDa
 }
 // MEJORADO: Si no se detectó _ud, buscar con reintentos EN CUALQUIER PÁGINA
 if(!ghlUserData){
-console.log("[HT] ⏳ Buscando _ud de GHL con reintentos...");
+// Buscar _ud de GHL silenciosamente
 var udAttempts=0;
 var udDetected=false;
 var udInterval=setInterval(function(){
@@ -633,13 +617,14 @@ udDetected=true;
 // No usar f() directamente porque crearía nueva sesión
 // En su lugar, actualizar el rstk_local con los nuevos datos
 if(ghlUserData.customer_id||ghlUserData.id){
-rstkLocal.contact_id=ghlUserData.customer_id||ghlUserData.id;
+// NO guardar el ext_crm_id aquí, esperar el contact_id interno del backend
+rstkLocal.ghl_contact_id=ghlUserData.customer_id||ghlUserData.id; // Solo guardar referencia GHL
 rstkLocal.email=ghlUserData.email||rstkLocal.email;
 rstkLocal.phone=ghlUserData.phone||rstkLocal.phone;
 rstkLocal.ghl_detected=true;
 rstkLocal.ghl_detected_at=new Date().toISOString();
 a.setItem("rstk_local",JSON.stringify(rstkLocal));
-console.log("[HT] 💾 rstk_local actualizado con datos de GHL detectados");
+// Quitado log de rstk_local actualizado
 // Enviar actualización al backend SIN crear nueva sesión
 var updateData={
 sid:e,vid:u,sess:g,
@@ -657,36 +642,32 @@ updateData.rstk_vid=ghlUserData.customData.rstk_vid;
 }
 // Enviar actualización silenciosa
 fetch(x,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(updateData),keepalive:!0})
-.then(function(r){console.log("[HT] ✅ Datos GHL actualizados en backend")})
+.then(function(r){return r.json()})
+.then(function(response){
+  console.log("[HT] ✅ Datos GHL actualizados en backend");
+  // Si el backend devuelve el contact_id interno, guardarlo
+  if(response.contact_id){
+    rstkLocal.contact_id = response.contact_id; // Ahora sí el ID interno!
+    rstkLocal.contact_id_internal = true;
+    a.setItem("rstk_local",JSON.stringify(rstkLocal));
+  }
+})
 .catch(function(e){console.log("[HT] ⚠️ Error actualizando GHL:",e)});
 }
 clearInterval(udInterval);
 }
 if(udAttempts>=20&&!udDetected){// 20 intentos = 40 segundos
 clearInterval(udInterval);
-console.log("[HT] ℹ️ _ud no detectado después de",udAttempts,"intentos (es normal si no es usuario GHL)");
+// _ud no detectado, es normal si no es usuario GHL
 }
 },2000);// Cada 2 segundos
 }
 Object.keys(o).forEach((function(e){null!=o[e]&&""!==o[e]||delete o[e]}));
 var cleanData={};Object.keys(o).forEach(function(k){if(o[k]!==null&&o[k]!==undefined&&o[k]!==""){cleanData[k]=o[k]}});
-console.group("[HT] 📤 Enviando: "+(n||"page_view"));
-console.log("🌐 URL:",cleanData.url);
-cleanData.ref&&console.log("⬅️ Referrer:",cleanData.ref);
-cleanData.utm_source&&console.log("📊 UTM Source:",cleanData.utm_source);
-cleanData.utm_campaign&&console.log("📢 UTM Campaign:",cleanData.utm_campaign);
-cleanData.gclid&&console.log("🔍 Google Click ID:",cleanData.gclid);
-cleanData.fbclid&&console.log("📘 Facebook Click ID:",cleanData.fbclid);
-cleanData.email&&console.log("📧 Email:",cleanData.email);
-cleanData.phone&&console.log("📱 Phone:",cleanData.phone);
-cleanData.ghl_contact_id&&console.log("👤 GHL Contact:",cleanData.ghl_contact_id);
-var paramCount=Object.keys(cleanData).length;
-console.log("📦 Total parámetros enviados:",paramCount);
-console.log("📋 Datos completos:",cleanData);
-console.groupEnd();
+// Enviar evento silenciosamente
 fetch(x,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o),keepalive:!0})
 .then((function(r){
-console.log("[HT] ✅ Evento enviado exitosamente (Status: "+r.status+")");
+// Evento enviado exitosamente
 // Si el servidor devolvió un contact_id, actualizar rstk_local
 if(r.status===200){return r.json().then(function(data){
 if(data.contact_id&&(o.email||o.phone||o.ghl_contact_id)){
@@ -711,11 +692,12 @@ if(o.fbclid){rstkLocal.fbclid=o.fbclid}
 if(o.gclid){rstkLocal.gclid=o.gclid}
 // Guardar todo actualizado
 a.setItem("rstk_local",JSON.stringify(rstkLocal));
-console.log("[HT] 💾 rstk_local actualizado (LEAD CONVERTIDO):",rstkLocal)
+// Lead convertido, rstk_local actualizado
 }}).catch(function(){})}}))
-.catch((function(e){console.warn("[HT] ⚠️ Error, reintentando con beacon:",e.message);
+.catch((function(e){
+// Error silencioso, reintentar con beacon
 if(navigator.sendBeacon){var n=new Blob([JSON.stringify(o)],{type:"application/json"});
-navigator.sendBeacon(x,n)&&console.log("[HT] 📡 Beacon enviado como fallback")}}))};
+navigator.sendBeacon(x,n)}}))};
 var lastUrl=location.href,debounceTimer=null;
 var trackIfChanged=function(){
 if(location.href!==lastUrl){
@@ -780,17 +762,17 @@ router.post('/collect', async (req, res) => {
     }
 
     // =============================================================================
-    // MANEJO ESPECIAL DE EVENTO ghl_update - VINCULACIÓN SIMPLE CON _UD
+    // MANEJO ESPECIAL DE EVENTO ghl_update - VINCULACIÓN CON _UD (FALLBACK)
     // =============================================================================
     if (data.event === 'ghl_update') {
-      console.log('🔄 [GHL UPDATE] Detectado _ud de GHL');
+      console.log('🔄 [GHL UPDATE] Detectado _ud de GHL como FALLBACK/VERIFICACIÓN');
 
       // Solo procesar si viene ghl_contact_id desde _ud
       if (data.ghl_contact_id) {
         try {
           // Buscar el contacto por ghl_contact_id
           const contactQuery = `
-            SELECT contact_id FROM contacts
+            SELECT contact_id, visitor_id FROM contacts
             WHERE ext_crm_id = $1
             LIMIT 1
           `;
@@ -798,24 +780,54 @@ router.post('/collect', async (req, res) => {
 
           if (contactResult.rows.length > 0) {
             const contactId = contactResult.rows[0].contact_id;
+            const existingVisitorId = contactResult.rows[0].visitor_id;
 
-            // Vincular TODAS las sesiones del visitor_id a este contacto
-            const updateResult = await databasePool.query(
-              `UPDATE tracking.sessions
-               SET contact_id = $1
-               WHERE visitor_id = $2 AND contact_id IS NULL`,
-              [contactId, visitorId]
-            );
+            // Verificar si ya está vinculado
+            const checkQuery = `
+              SELECT COUNT(*) as linked
+              FROM tracking.sessions
+              WHERE visitor_id = $1 AND contact_id = $2
+              LIMIT 1
+            `;
+            const checkResult = await databasePool.query(checkQuery, [visitorId, contactId]);
 
-            console.log(`✅ [GHL UPDATE] ${updateResult.rowCount} sesiones vinculadas al contacto ${contactId}`);
+            if (checkResult.rows[0].linked > 0) {
+              console.log('✓ [GHL UPDATE] Sesiones ya vinculadas por webhook, _ud confirma vinculación');
+            } else {
+              // Vincular TODAS las sesiones del visitor_id a este contacto (FALLBACK)
+              const updateResult = await databasePool.query(
+                `UPDATE tracking.sessions
+                 SET contact_id = $1, updated_at = NOW()
+                 WHERE visitor_id = $2 AND contact_id IS NULL`,
+                [contactId, visitorId]
+              );
+
+              if (updateResult.rowCount > 0) {
+                console.log(`✅ [GHL UPDATE FALLBACK] ${updateResult.rowCount} sesiones vinculadas por _ud (webhook no tenía visitor_id)`);
+              } else {
+                console.log('ℹ️ [GHL UPDATE] No hay sesiones nuevas para vincular');
+              }
+            }
 
             // Actualizar contacto con visitor_id si no lo tenía
-            await databasePool.query(
-              `UPDATE contacts
-               SET visitor_id = COALESCE(visitor_id, $2), updated_at = NOW()
-               WHERE contact_id = $1`,
-              [contactId, visitorId]
-            );
+            if (!existingVisitorId) {
+              await databasePool.query(
+                `UPDATE contacts
+                 SET visitor_id = $2, updated_at = NOW()
+                 WHERE contact_id = $1`,
+                [contactId, visitorId]
+              );
+              console.log('📝 [GHL UPDATE] Visitor_id agregado al contacto');
+            }
+
+            // DEVOLVER EL CONTACT_ID INTERNO AL FRONTEND
+            // Para que pueda actualizar rstk_local con el ID correcto
+            return res.json({
+              success: true,
+              contact_id: contactId, // El ID interno, no el ext_crm_id
+              message: 'Contact linked via _ud'
+            });
+
           } else {
             console.log(`⚠️ [GHL UPDATE] Contacto no encontrado para ghl_contact_id: ${data.ghl_contact_id}`);
           }
@@ -826,7 +838,8 @@ router.post('/collect', async (req, res) => {
 
       return res.json({
         success: true,
-        message: 'GHL update processed',
+        message: 'GHL update processed as fallback',
+        role: 'fallback',
         visitor_id: visitorId
       });
     }
