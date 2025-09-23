@@ -53,13 +53,19 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
   const [leadsModalOpen, setLeadsModalOpen] = useState(modalType === 'leads')
   const [appointmentsModalOpen, setAppointmentsModalOpen] = useState(modalType === 'appointments')
   const [newCustomersModalOpen, setNewCustomersModalOpen] = useState(modalType === 'new_customers')
-  
+
   const [sales, setSales] = useState<Payment[]>([])
   const [leads, setLeads] = useState<Contact[]>([])
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [newCustomers, setNewCustomers] = useState<Contact[]>([])
-  
+
   const [loading, setLoading] = useState(false)
+
+  // Estados para búsqueda en cada tabla
+  const [salesSearch, setSalesSearch] = useState('')
+  const [leadsSearch, setLeadsSearch] = useState('')
+  const [appointmentsSearch, setAppointmentsSearch] = useState('')
+  const [customersSearch, setCustomersSearch] = useState('')
 
   // Abrir el modal correcto según el tipo
   useEffect(() => {
@@ -380,6 +386,11 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
     setLeadsModalOpen(false)
     setAppointmentsModalOpen(false)
     setNewCustomersModalOpen(false)
+    // Limpiar búsquedas al cerrar
+    setSalesSearch('')
+    setLeadsSearch('')
+    setAppointmentsSearch('')
+    setCustomersSearch('')
     onClose()
   }
 
@@ -463,6 +474,51 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
     }
   ]
 
+  // Funciones de filtrado para búsqueda
+  const filterSales = (data: Payment[]) => {
+    if (!salesSearch.trim()) return data
+    const searchLower = salesSearch.toLowerCase()
+    return data.filter(item => {
+      const name = item.contact ? `${item.contact.first_name || ''} ${item.contact.last_name || ''}`.toLowerCase() : ''
+      const email = item.contact?.email?.toLowerCase() || ''
+      const amount = item.amount?.toString() || ''
+      return name.includes(searchLower) || email.includes(searchLower) || amount.includes(searchLower)
+    })
+  }
+
+  const filterLeads = (data: Contact[]) => {
+    if (!leadsSearch.trim()) return data
+    const searchLower = leadsSearch.toLowerCase()
+    return data.filter(item => {
+      const name = `${item.first_name || ''} ${item.last_name || ''}`.toLowerCase()
+      const email = item.email?.toLowerCase() || ''
+      const phone = item.phone || ''
+      return name.includes(searchLower) || email.includes(searchLower) || phone.includes(searchLower)
+    })
+  }
+
+  const filterAppointments = (data: Appointment[]) => {
+    if (!appointmentsSearch.trim()) return data
+    const searchLower = appointmentsSearch.toLowerCase()
+    return data.filter(item => {
+      const name = item.contact ? `${item.contact.first_name || ''} ${item.contact.last_name || ''}`.toLowerCase() : ''
+      const phone = item.contact?.phone || ''
+      const contactId = item.contact_id || ''
+      return name.includes(searchLower) || phone.includes(searchLower) || contactId.includes(searchLower)
+    })
+  }
+
+  const filterCustomers = (data: Contact[]) => {
+    if (!customersSearch.trim()) return data
+    const searchLower = customersSearch.toLowerCase()
+    return data.filter(item => {
+      const name = `${item.first_name || ''} ${item.last_name || ''}`.toLowerCase()
+      const email = item.email?.toLowerCase() || ''
+      const phone = item.phone || ''
+      return name.includes(searchLower) || email.includes(searchLower) || phone.includes(searchLower)
+    })
+  }
+
   return (
     <>
 
@@ -485,9 +541,13 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
 
           <TableWithControls
             columns={salesColumns.filter(c => c.visible)}
-            data={sales}
+            data={filterSales(sales)}
             loading={loading}
             emptyMessage="No hay transacciones en este período"
+            hasSearch={true}
+            searchQuery={salesSearch}
+            onSearchChange={setSalesSearch}
+            searchMessage="No se encontraron transacciones que coincidan con la búsqueda"
           />
 
           {sales.length > 0 && (
@@ -495,7 +555,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
               <div className="flex justify-between items-center">
                 <span className="text-secondary">Total del período:</span>
                 <span className="text-xl font-semibold text-primary">
-                  {formatCurrency(sales.reduce((sum, s) => sum + (Number(s.amount) || 0), 0))}
+                  {formatCurrency(filterSales(sales).reduce((sum, s) => sum + (Number(s.amount) || 0), 0))}
                 </span>
               </div>
             </div>
@@ -523,9 +583,13 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
 
           <TableWithControls
             columns={leadsColumns.filter(c => c.visible)}
-            data={leads}
+            data={filterLeads(leads)}
             loading={loading}
             emptyMessage="No hay leads en este período"
+            hasSearch={true}
+            searchQuery={leadsSearch}
+            onSearchChange={setLeadsSearch}
+            searchMessage="No se encontraron leads que coincidan con la búsqueda"
           />
         </div>
       </Modal>
@@ -550,9 +614,13 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
 
           <TableWithControls
             columns={appointmentsColumns.filter(c => c.visible)}
-            data={appointments}
+            data={filterAppointments(appointments)}
             loading={loading}
             emptyMessage="No hay citas en este período"
+            hasSearch={true}
+            searchQuery={appointmentsSearch}
+            onSearchChange={setAppointmentsSearch}
+            searchMessage="No se encontraron citas que coincidan con la búsqueda"
           />
         </div>
       </Modal>
@@ -579,9 +647,13 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
 
           <TableWithControls
             columns={newCustomersColumns.filter(c => c.visible)}
-            data={newCustomers}
+            data={filterCustomers(newCustomers)}
             loading={loading}
             emptyMessage="No hay clientes nuevos en este período"
+            hasSearch={true}
+            searchQuery={customersSearch}
+            onSearchChange={setCustomersSearch}
+            searchMessage="No se encontraron clientes que coincidan con la búsqueda"
           />
 
           {newCustomers.length > 0 && (
@@ -589,7 +661,7 @@ export function ReportsModals({ periodStart, periodEnd, reportType, modalType, o
               <div className="flex justify-between items-center">
                 <span className="text-secondary">Lifetime value total:</span>
                 <span className="text-xl font-semibold text-primary">
-                  {formatCurrency(newCustomers.reduce((sum, c: any) => sum + (c.lifetime_value || c.total_amount || 0), 0))}
+                  {formatCurrency(filterCustomers(newCustomers).reduce((sum, c: any) => sum + (c.lifetime_value || c.total_amount || 0), 0))}
                 </span>
               </div>
             </div>
