@@ -96,10 +96,14 @@ validate_security() {
 load_environment() {
     print_step "Cargando variables de entorno seguras..."
 
-    # Cargar desde .env.local
-    set -a
-    source "${PROJECT_ROOT}/.env.local"
-    set +a
+    # Cargar desde .env.local (agnóstico: maneja caracteres especiales)
+    # No usar source porque falla con & y otros caracteres especiales
+    while IFS='=' read -r key value; do
+        # Saltar líneas vacías y comentarios
+        [[ -z "$key" || "$key" =~ ^# ]] && continue
+        # Exportar la variable
+        export "$key=$value"
+    done < <(grep -v '^#' "${PROJECT_ROOT}/.env.local" | grep -v '^$')
 
     # Variables requeridas
     REQUIRED_VARS=(
@@ -304,12 +308,11 @@ SETUP_DIRS
 setup_environment_file() {
     print_step "Configurando archivo de variables de producción..."
 
-    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << EOF
-    # Verificar si ya existe
-    if [ ! -f "/etc/ristak/env.production" ]; then
-        echo "📝 Creando archivo de configuración de producción..."
+    # Copiar el archivo de producción local al servidor (agnóstico: siempre actualizado)
+    echo "📝 Actualizando archivo de configuración de producción..."
 
-        cat > /etc/ristak/env.production << 'ENV_FILE'
+    # Crear archivo temporal con las variables actuales
+    cat > /tmp/env.production.tmp << ENVFILE
 # ================================================
 # RISTAK - CONFIGURACIÓN DE PRODUCCIÓN
 # ================================================
@@ -319,69 +322,43 @@ setup_environment_file() {
 
 # === ESENCIALES ===
 NODE_ENV=production
-DATABASE_URL=$DATABASE_URL
+DATABASE_URL=${DATABASE_URL}
 API_PORT=3002
-PORT=3001
 
 # === META/FACEBOOK ===
-META_APP_ID=$META_APP_ID
-META_APP_SECRET=$META_APP_SECRET
-META_ENCRYPTION_KEY=$META_ENCRYPTION_KEY
+META_APP_ID=${META_APP_ID}
+META_APP_SECRET=${META_APP_SECRET}
+META_ENCRYPTION_KEY=${META_ENCRYPTION_KEY}
 META_GRAPH_VERSION=v23.0
-META_REDIRECT_URI=https://send.hollytrack.com/api/meta/oauth/callback
 
 # === TRACKING ===
-TRACKING_HOST=$TRACKING_HOST
+TRACKING_HOST=${TRACKING_HOST:-ilove.hollytrack.com}
 TRACKING_PROTOCOL=https
-WEBHOOK_BASE_URL=$WEBHOOK_BASE_URL
-TRACKING_DOMAIN=$TRACKING_DOMAIN
-TRACK_HOST=https://app.hollytrack.com
-ALLOW_CUSTOM_DOMAINS=true
+WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-https://send.hollytrack.com}
 
 # === CLOUDFLARE ===
-CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN
-CLOUDFLARE_ZONE_ID=$CLOUDFLARE_ZONE_ID
+CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+CLOUDFLARE_ZONE_ID=${CLOUDFLARE_ZONE_ID}
 
 # === DOMINIOS ===
-DOMAIN_APP=$DOMAIN_APP
-DOMAIN_SEND=$DOMAIN_SEND
-DOMAIN_TRACK=$DOMAIN_TRACK
+DOMAIN_APP=${DOMAIN_APP}
+DOMAIN_SEND=${DOMAIN_SEND}
+DOMAIN_TRACK=${DOMAIN_TRACK}
 
 # === SEGURIDAD ===
-AUTH_SECRET=$AUTH_SECRET
-JWT_SECRET=$(openssl rand -hex 32)
-SESSION_SECRET=$(openssl rand -hex 32)
-ENV_FILE
+AUTH_SECRET=${AUTH_SECRET}
+ENVFILE
 
-        # Reemplazar TODAS las variables con valores reales de .env.local
-        sed -i "s|\$DATABASE_URL|$DATABASE_URL|g" /etc/ristak/env.production
-        sed -i "s|\$META_APP_SECRET|$META_APP_SECRET|g" /etc/ristak/env.production
-        sed -i "s|\$META_APP_ID|$META_APP_ID|g" /etc/ristak/env.production
-        sed -i "s|\$META_ENCRYPTION_KEY|$META_ENCRYPTION_KEY|g" /etc/ristak/env.production
-        sed -i "s|\$CLOUDFLARE_API_TOKEN|$CLOUDFLARE_API_TOKEN|g" /etc/ristak/env.production
-        sed -i "s|\$CLOUDFLARE_ZONE_ID|$CLOUDFLARE_ZONE_ID|g" /etc/ristak/env.production
-        sed -i "s|\$AUTH_SECRET|$AUTH_SECRET|g" /etc/ristak/env.production
-        sed -i "s|\$DOMAIN_APP|$DOMAIN_APP|g" /etc/ristak/env.production
-        sed -i "s|\$DOMAIN_SEND|$DOMAIN_SEND|g" /etc/ristak/env.production
-        sed -i "s|\$DOMAIN_TRACK|$DOMAIN_TRACK|g" /etc/ristak/env.production
+    # Transferir el archivo al servidor
+    sshpass -p "$SERVER_PASSWORD" scp -o StrictHostKeyChecking=no /tmp/env.production.tmp $SERVER_USER@$SERVER_HOST:/tmp/env.production.tmp
 
-        # Variables con valores por defecto si no están definidas
-        TRACKING_HOST=${TRACKING_HOST:-$DOMAIN_TRACK}
-        TRACKING_DOMAIN=${TRACKING_DOMAIN:-$DOMAIN_TRACK}
-        WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-"https://$DOMAIN_SEND"}
-
-        sed -i "s|\$TRACKING_HOST|$TRACKING_HOST|g" /etc/ristak/env.production
-        sed -i "s|\$TRACKING_DOMAIN|$TRACKING_DOMAIN|g" /etc/ristak/env.production
-        sed -i "s|\$WEBHOOK_BASE_URL|$WEBHOOK_BASE_URL|g" /etc/ristak/env.production
-
-        # Asegurar permisos
+    # Mover el archivo a su ubicación final y configurar permisos
+    sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'REMOTE_CMD'
+        mkdir -p /etc/ristak
+        mv /tmp/env.production.tmp /etc/ristak/env.production
         chmod 600 /etc/ristak/env.production
-
-        echo "✅ Archivo de configuración creado"
-    else
-        echo "ℹ️ Archivo de configuración ya existe"
-    fi
-EOF
+        echo "✅ Archivo de configuración actualizado"
+REMOTE_CMD
 
     print_success "Variables de entorno de producción configuradas"
 }
@@ -752,15 +729,17 @@ ADMIN_SCRIPT
     # Configurar PM2 para backend
     sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "
         cd /opt/ristak
-        pm2 stop ristak-backend 2>/dev/null || true
+        # IMPORTANTE: Eliminar completamente el proceso para forzar recarga de variables
         pm2 delete ristak-backend 2>/dev/null || true
 
-        # Crear symlink del archivo de variables
+        # Crear symlinks para que el backend encuentre las variables (agnóstico: múltiples rutas)
         ln -sf /etc/ristak/env.production /opt/ristak/api/.env
+        ln -sf /etc/ristak/env.production /opt/ristak/.env.local
 
-        # Iniciar backend con variables de entorno
+        # CRÍTICO: Exportar y iniciar con variables frescas (agnóstico: siempre actualizado)
+        # Usar --update-env para forzar actualización de variables de entorno
         export \$(cat /etc/ristak/env.production | grep -v '^#' | xargs)
-        pm2 start api/src/server.js --name 'ristak-backend' --max-memory-restart 500M --update-env
+        pm2 start api/src/server.js --name 'ristak-backend' --update-env
 
         pm2 save
         pm2 startup systemd -u root --hp /root 2>/dev/null || true

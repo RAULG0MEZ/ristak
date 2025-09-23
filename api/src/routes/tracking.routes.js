@@ -481,7 +481,7 @@ canvas.height=60;
 var ctx=canvas.getContext('2d');
 // Usar múltiples técnicas para crear un fingerprint único
 ctx.textBaseline='top';
-ctx.font='14px \'Arial\'';
+ctx.font='14px Arial';
 ctx.textBaseline='alphabetic';
 ctx.fillStyle='#f60';
 ctx.fillRect(125,1,62,20);
@@ -1811,10 +1811,11 @@ router.post('/collect', async (req, res) => {
         network_save_data: data.network_save_data || false
       }),
       // NUEVOS PARÁMETROS DE FINGERPRINTING SEPARADOS
-      data.canvas_fp || null,             // $112 canvas_fingerprint
-      data.webgl_fp || null,              // $113 webgl_fingerprint
-      data.audio_fp || null,              // $114 audio_fingerprint
-      data.fonts_fp || null,              // $115 fonts_fingerprint
+      // Truncar fingerprints largos para evitar error de índice PostgreSQL (máximo 8191 bytes)
+      data.canvas_fp ? data.canvas_fp.substring(0, 1000) : null,  // $112 canvas_fingerprint (truncado)
+      data.webgl_fp ? data.webgl_fp.substring(0, 500) : null,     // $113 webgl_fingerprint (truncado)
+      data.audio_fp ? data.audio_fp.substring(0, 500) : null,     // $114 audio_fingerprint (truncado)
+      data.fonts_fp ? data.fonts_fp.substring(0, 500) : null,     // $115 fonts_fingerprint (truncado)
       deviceFingerprint,                  // $116 device_fingerprint (hardware only)
       browserFingerprint,                 // $117 browser_fingerprint (software only)
       deviceConfidence,                   // $118 device_confidence
