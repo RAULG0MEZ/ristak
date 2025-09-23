@@ -90,14 +90,22 @@ export function ContactDetailsModal({
   const [journey, setJourney] = useState<ContactJourney | null>(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
 
-  // Seleccionar automáticamente el primer contacto cuando se cargan los datos
+  // Resetear y seleccionar automáticamente el primer contacto cuando se abre el modal o cambian los datos
   useEffect(() => {
-    if (data.length > 0 && !selectedContact) {
+    if (isOpen && data.length > 0) {
       const firstContact = data[0]
       setSelectedContact(firstContact)
       handleContactClick(firstContact)
+    } else if (!isOpen) {
+      // Limpiar estado cuando se cierra el modal
+      setSelectedContact(null)
+      setSearchQuery('')
+      setActiveTab('list')
+      setShowTransactions(false)
+      setTransactions([])
+      setJourney(null)
     }
-  }, [data])
+  }, [isOpen, data])
 
   // Filtrar contactos según búsqueda
   const filteredData = useMemo(() => {
