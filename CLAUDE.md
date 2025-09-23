@@ -8,17 +8,33 @@ En el codigo siempre tienes que hacer anotaciones o descripcioens agnosticas par
 
 TENEMOS 2 REPOS DIFERENTES CON REGLAS DISTINTAS:
 
-1. **REPO DE RAÚL** (https://github.com/RAULG0MEZ)
+1. **REPO DE RAÚL** (https://github.com/RAULG0MEZ/ristak.git)
+   - Remote: `raul`
    - ✅ SÍ SE SUBEN TODAS LAS VARIABLES Y CREDENCIALES
    - ✅ Incluir .env.local, .env.production, DATABASE_URL, todo
    - Este es tu repo personal donde guardas TODO
 
-2. **REPO DE RISTAK** (https://github.com/RistakApp)
+2. **REPO DE RISTAK** (https://github.com/RistakApp/ristak-MVP.git)
+   - Remote: `ristak`
    - ❌ NO SE SUBE DATABASE_URL NI CONTRASEÑAS DE NEON
    - ✅ SÍ se suben otras variables (META, CLOUDFLARE, dominios, etc)
    - Solo código limpio sin credenciales sensibles
 
-IMPORTANTE: Antes de hacer push, siempre verificar a cuál repo estás enviando.
+COMANDOS PARA PUSH:
+```bash
+# Para pushear a TU repo personal (CON contraseñas):
+git push raul main
+
+# Para pushear al repo de Ristak (SIN contraseñas):
+git push ristak main
+
+# Ver a qué repos está conectado:
+git remote -v
+```
+
+IMPORTANTE:
+- Antes de hacer push al repo `ristak`, asegúrate que .gitignore excluya .env.local y api/.env
+- Antes de hacer push al repo `raul`, puedes incluir TODO
 
 PROMPT ÚNICO PARA IA PROGRAMADORA — FRONT NUEVO + BACKEND PROPIO ORDENADO (SIN ROMPER NADA)
 
