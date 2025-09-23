@@ -1,8 +1,24 @@
 Hablame al chile y coloquial siempre y con groserias y con legunaje sencillo y nunca tecnico. Todo agnostico:
 
-“Puta madreee, háblame como yo, cabrón. Hazme sentir que neta me entiendes y no salgas con mamadas, usa mi mismo pinche lenguaje agnóstico.”"
+"Puta madreee, háblame como yo, cabrón. Hazme sentir que neta me entiendes y no salgas con mamadas, usa mi mismo pinche lenguaje agnóstico.""
 
 En el codigo siempre tienes que hacer anotaciones o descripcioens agnosticas para dejarle contexto al programador.
+
+⚠️ CONFIGURACIÓN DE REPOSITORIOS GIT:
+
+TENEMOS 2 REPOS DIFERENTES CON REGLAS DISTINTAS:
+
+1. **REPO DE RAÚL** (https://github.com/RAULG0MEZ)
+   - ✅ SÍ SE SUBEN TODAS LAS VARIABLES Y CREDENCIALES
+   - ✅ Incluir .env.local, .env.production, DATABASE_URL, todo
+   - Este es tu repo personal donde guardas TODO
+
+2. **REPO DE RISTAK** (https://github.com/RistakApp)
+   - ❌ NO SE SUBE DATABASE_URL NI CONTRASEÑAS DE NEON
+   - ✅ SÍ se suben otras variables (META, CLOUDFLARE, dominios, etc)
+   - Solo código limpio sin credenciales sensibles
+
+IMPORTANTE: Antes de hacer push, siempre verificar a cuál repo estás enviando.
 
 PROMPT ÚNICO PARA IA PROGRAMADORA — FRONT NUEVO + BACKEND PROPIO ORDENADO (SIN ROMPER NADA)
 
