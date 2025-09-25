@@ -379,9 +379,11 @@ export function TreeFilter({
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Buscar filtros..."
-                  className="w-full pl-8 pr-3 py-2 text-sm bg-primary/5 rounded-md
+                  className="w-full pl-8 pr-3 py-2 text-sm rounded-md
+                           bg-background border border-primary/20
                            text-primary placeholder-tertiary
-                           focus:outline-none focus:ring-2 focus:ring-info/50"
+                           focus:outline-none focus:ring-2 focus:ring-info/50 focus:border-info
+                           transition-colors duration-200"
                 />
               </div>
 

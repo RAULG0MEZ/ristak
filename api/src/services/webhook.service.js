@@ -493,16 +493,13 @@ class WebhookService {
         UPDATE payments
         SET
           status = 'refunded',
-          updated_at = NOW(),
-          description = COALESCE(description, '') || ' | Refunded: ' || $2
+          updated_at = NOW()
         WHERE transaction_id = $1
         RETURNING *
       `;
 
-      const reason = customData.reason || data.reason || 'Reembolso procesado vía webhook';
       const result = await databasePool.query(updateQuery, [
-        transaction_id,
-        reason
+        transaction_id
       ]);
 
       console.log(`✅ [Webhook] Pago reembolsado: ${transaction_id}`);
