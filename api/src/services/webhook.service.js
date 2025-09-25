@@ -335,22 +335,19 @@ class WebhookService {
 
   // Mapeo completo para citas - GUARDA TODOS LOS CAMPOS RELEVANTES
   async processAppointment(data) {
-    const requiredFields = ['contact_id'];
-    const missingFields = [];
+    // Extraer contact_id del customData si existe
+    const contact_id = data.customData?.contact_id || data.contact_id;
 
-    for (const field of requiredFields) {
-      if (!data[field]) {
-        missingFields.push(field);
-      }
-    }
-
-    if (missingFields.length > 0) {
-      const error = new Error(`Campos requeridos faltantes: ${missingFields.join(', ')}`);
-      error.fields = missingFields;
+    if (!contact_id) {
+      const error = new Error(`Campo requerido faltante: contact_id (buscado en customData y nivel principal)`);
+      error.fields = ['contact_id'];
       throw error;
     }
 
-    console.log('[Webhook] Procesando appointment completo para contact_id:', data.contact_id);
+    // Extraer customData para citas
+    const customData = data.customData || {};
+
+    console.log('[Webhook] Procesando appointment para contact_id:', contact_id, 'customData:', customData);
 
     try {
       // Buscar el contacto por ext_crm_id, si no existe lo creamos
@@ -360,25 +357,30 @@ class WebhookService {
         WHERE ext_crm_id = $1
         LIMIT 1
       `;
-      const contactResult = await databasePool.query(contactQuery, [data.contact_id]);
+      const contactResult = await databasePool.query(contactQuery, [contact_id]);
 
       if (contactResult.rows.length === 0) {
         // Crear contacto si no existe
-        console.log(`[Webhook] Contacto no existe, creando nuevo para ext_crm_id: ${data.contact_id}`);
+        console.log(`[Webhook] Contacto no existe, creando nuevo para ext_crm_id: ${contact_id}`);
         finalContactId = await this.generateContactId();
 
         const insertContactQuery = `
           INSERT INTO contacts (
-            contact_id, ext_crm_id, status, source, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, NOW(), NOW())
+            contact_id, first_name, last_name, email, phone,
+            ext_crm_id, status, source, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
           RETURNING contact_id
         `;
 
         const newContactResult = await databasePool.query(insertContactQuery, [
           finalContactId,
-          data.contact_id, // ext_crm_id = GHL contact_id
+          data.first_name || null,
+          data.last_name || null,
+          data.email || null,
+          data.phone || null,
+          contact_id, // ext_crm_id = el contact_id del webhook
           'lead',
-          'webhook'
+          'webhook-appointment'
         ]);
 
         console.log(`✅ [Webhook] Contacto creado: ${finalContactId}`);
@@ -454,28 +456,19 @@ class WebhookService {
 
   // Mapeo flexible para reembolsos - CON CUSTOM DATA
   async processRefund(data) {
-    const requiredFields = ['transaction_id'];
-    const missingFields = [];
+    // Extraer transaction_id del customData si existe
+    const transaction_id = data.customData?.transaction_id || data.transaction_id;
 
-    for (const field of requiredFields) {
-      if (!data[field]) {
-        missingFields.push(field);
-      }
-    }
-
-    if (missingFields.length > 0) {
-      const error = new Error(`Campos requeridos faltantes: ${missingFields.join(', ')}`);
-      error.fields = missingFields;
+    if (!transaction_id) {
+      const error = new Error(`Campo requerido faltante: transaction_id (buscado en customData y nivel principal)`);
+      error.fields = ['transaction_id'];
       throw error;
     }
 
-    console.log('[Webhook] Procesando refund con customData:', data.transaction_id);
+    // Extraer customData para refunds
+    const customData = data.customData || {};
 
-    // Extraer CustomData específico para refunds: transaction_id
-    const customData = {};
-    if (data.transaction_id !== undefined) customData.transaction_id = data.transaction_id;
-
-    console.log('[Webhook] CustomData extraído para refund:', customData);
+    console.log('[Webhook] Procesando refund con transaction_id:', transaction_id, 'customData:', customData);
 
     try {
       // Buscar el pago original
@@ -483,16 +476,16 @@ class WebhookService {
         SELECT * FROM payments
         WHERE transaction_id = $1
       `;
-      const paymentResult = await databasePool.query(paymentQuery, [data.transaction_id]);
+      const paymentResult = await databasePool.query(paymentQuery, [transaction_id]);
 
       if (paymentResult.rows.length === 0) {
-        throw new Error(`Transacción no encontrada: ${data.transaction_id}`);
+        throw new Error(`Transacción no encontrada: ${transaction_id}`);
       }
 
       const originalPayment = paymentResult.rows[0];
 
       if (originalPayment.status === 'refunded') {
-        throw new Error(`La transacción ${data.transaction_id} ya fue reembolsada`);
+        throw new Error(`La transacción ${transaction_id} ya fue reembolsada`);
       }
 
       // Marcar como reembolsado
@@ -506,13 +499,13 @@ class WebhookService {
         RETURNING *
       `;
 
-      const reason = data.reason || 'Reembolso procesado vía webhook';
+      const reason = customData.reason || data.reason || 'Reembolso procesado vía webhook';
       const result = await databasePool.query(updateQuery, [
-        data.transaction_id,
+        transaction_id,
         reason
       ]);
 
-      console.log(`✅ [Webhook] Pago reembolsado: ${data.transaction_id}`);
+      console.log(`✅ [Webhook] Pago reembolsado: ${transaction_id}`);
       return result.rows[0];
     } catch (error) {
       console.error('[Webhook] Error en processRefund:', error);

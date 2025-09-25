@@ -299,14 +299,15 @@ export function TreeFilter({
           {/* Checkbox para items hoja */}
           {!hasChildren && node.field && (
             <div className={`
-              w-3.5 h-3.5 rounded border transition-all duration-200
+              w-4 h-4 rounded border-2 transition-all duration-200
+              flex items-center justify-center flex-shrink-0
               ${isSelected
                 ? 'bg-info border-info'
-                : 'border-primary/40 hover:border-primary'
+                : 'bg-transparent border-primary/40 hover:border-primary'
               }
             `}>
               {isSelected && (
-                <Icons.check className="w-3 h-3 text-white" />
+                <Icons.check className="w-2.5 h-2.5 text-white stroke-[3]" />
               )}
             </div>
           )}

@@ -1373,8 +1373,101 @@ export function Analytics() {
 
     setTrafficSources(sourceData)
 
-    // Los datos de navegadores ya se calculan arriba en loadAnalyticsData
-    // No necesitamos recalcular aquí
+    // Agnóstico: Recalcular TODOS los datos de las tarjetas basándose en sesiones filtradas
+    // Navegadores
+    const browsersFiltered: { [key: string]: number } = {}
+    sessions.forEach((session: Session) => {
+      const browser = session.browser || 'Desconocido'
+      browsersFiltered[browser] = (browsersFiltered[browser] || 0) + 1
+    })
+
+    const browserStatsFiltered = Object.entries(browsersFiltered)
+      .map(([browser, count]) => ({
+        name: browser,
+        icon: browser,
+        users: count,
+        percentage: sessions.length > 0 ? ((count / sessions.length) * 100).toFixed(1) : '0'
+      }))
+      .sort((a, b) => b.users - a.users)
+      .slice(0, 5)
+
+    setBrowserData(browserStatsFiltered)
+
+    // Plataformas
+    const platformsFiltered: { [key: string]: number } = {}
+    sessions.forEach((session: Session) => {
+      const platform = session.source_platform || session.utm_source || 'Directo'
+      platformsFiltered[platform] = (platformsFiltered[platform] || 0) + 1
+    })
+
+    const platformStatsFiltered = Object.entries(platformsFiltered)
+      .map(([platform, count]) => ({
+        name: platform,
+        icon: platform,
+        users: count,
+        percentage: sessions.length > 0 ? ((count / sessions.length) * 100).toFixed(1) : '0'
+      }))
+      .sort((a, b) => b.users - a.users)
+      .slice(0, 5)
+
+    setPlatformsData(platformStatsFiltered)
+
+    // Ubicaciones/Placements
+    const placementsFiltered: { [key: string]: number } = {}
+    sessions.forEach((session: Session) => {
+      const placement = session.placement || 'Sin ubicación'
+      placementsFiltered[placement] = (placementsFiltered[placement] || 0) + 1
+    })
+
+    const placementStatsFiltered = Object.entries(placementsFiltered)
+      .map(([placement, count]) => ({
+        name: placement.replace(/_/g, ' '),
+        icon: placement,
+        users: count,
+        percentage: sessions.length > 0 ? ((count / sessions.length) * 100).toFixed(1) : '0'
+      }))
+      .sort((a, b) => b.users - a.users)
+      .slice(0, 5)
+
+    setPlacementsData(placementStatsFiltered)
+
+    // Dispositivos
+    const devicesFiltered: { [key: string]: number } = {}
+    sessions.forEach((session: Session) => {
+      const device = session.device_type || 'Desconocido'
+      devicesFiltered[device] = (devicesFiltered[device] || 0) + 1
+    })
+
+    const deviceStatsFiltered = Object.entries(devicesFiltered)
+      .map(([device, count]) => ({
+        name: device,
+        icon: device,
+        users: count,
+        percentage: sessions.length > 0 ? ((count / sessions.length) * 100).toFixed(1) : '0'
+      }))
+      .sort((a, b) => b.users - a.users)
+      .slice(0, 5)
+
+    setDevicesData(deviceStatsFiltered)
+
+    // Sistemas Operativos
+    const osFiltered: { [key: string]: number } = {}
+    sessions.forEach((session: Session) => {
+      const os = session.os || 'Desconocido'
+      osFiltered[os] = (osFiltered[os] || 0) + 1
+    })
+
+    const osStatsFiltered = Object.entries(osFiltered)
+      .map(([os, count]) => ({
+        name: os,
+        icon: os,
+        users: count,
+        percentage: sessions.length > 0 ? ((count / sessions.length) * 100).toFixed(1) : '0'
+      }))
+      .sort((a, b) => b.users - a.users)
+      .slice(0, 5)
+
+    setOsData(osStatsFiltered)
 
     // Top Visitors con sesiones filtradas
     const topVisitorsList = Object.entries(visitorCounts)
