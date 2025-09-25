@@ -4,6 +4,7 @@ import { KPICard } from '../ui/KPICard'
 import { DateRangePicker } from '../ui/DateRangePicker'
 import { ChartContainer } from '../ui/ChartContainer'
 import { Select } from '../ui/Select'
+import { TreeFilter } from '../ui/TreeFilter'
 import { Icons } from '../icons'
 import { useDateRange } from '../contexts/DateContext'
 import { formatNumber, formatCurrency, formatDate } from '../lib/utils'
@@ -26,6 +27,7 @@ interface Session {
   utm_source?: string
   utm_medium?: string
   utm_campaign?: string
+  utm_content?: string // Agregado para anuncios
   referrer_domain?: string
   browser?: string
   device_type?: string
@@ -47,7 +49,7 @@ export function Analytics() {
   const { theme, themeData } = useTheme()
   const isDarkMode = theme === 'dark'
   const [loading, setLoading] = useState(false)
-  const [selectedPage, setSelectedPage] = useState('todos') // Por defecto 'Todos'
+  const [selectedFilters, setSelectedFilters] = useState<Record<string, string[]>>({}) // Filtros multi-categor\u00eda
   const [availablePages, setAvailablePages] = useState<{page: string, count: number}[]>([])
   const [allSessions, setAllSessions] = useState<Session[]>([]) // Todas las sesiones sin filtrar
   const [sessions, setSessions] = useState<Session[]>([]) // Sesiones filtradas
@@ -87,6 +89,7 @@ export function Analytics() {
   const [browserData, setBrowserData] = useState<any[]>([])
   const [topVisitors, setTopVisitors] = useState<any[]>([]) // Estado faltante para top visitors
   const [locationData, setLocationData] = useState<any>(null) // Datos de ubicaciones geográficas
+  const [availableFilterData, setAvailableFilterData] = useState<any>({}) // Datos disponibles para filtros
   const [mapView, setMapView] = useState<'world' | 'country'>('country') // Vista del mapa - México por defecto
   const [selectedCountry, setSelectedCountry] = useState<string>('México') // País seleccionado
   const [mapZoom, setMapZoom] = useState(2.5) // Nivel de zoom del mapa - inicia con zoom más alto
@@ -560,6 +563,90 @@ export function Analytics() {
           setAvailablePages(pageList)
           // Páginas disponibles
 
+          // Agn\u00f3stico: Recopilar TODOS los datos disponibles para el TreeFilter
+          const filterData: any = {
+            pages: pageList,
+            campaigns: [],
+            adsets: [],
+            ads: [],
+            sources: [],
+            devices: [],
+            browsers: [],
+            os: [],
+            placements: []
+          }
+
+          // Recolectar campañas únicas
+          const campaignsMap: { [key: string]: number } = {}
+          const adsMap: { [key: string]: number } = {}
+          const sourcesMap: { [key: string]: number } = {}
+          const devicesMap: { [key: string]: number } = {}
+          const browsersMap: { [key: string]: number } = {}
+          const osMap: { [key: string]: number } = {}
+          const placementsMap: { [key: string]: number } = {}
+
+          response.forEach((session: Session) => {
+            // Campañas
+            if (session.utm_campaign) {
+              campaignsMap[session.utm_campaign] = (campaignsMap[session.utm_campaign] || 0) + 1
+            }
+            // Anuncios (utm_content)
+            if (session.utm_content) {
+              adsMap[session.utm_content] = (adsMap[session.utm_content] || 0) + 1
+            }
+            // Fuentes
+            if (session.utm_source) {
+              sourcesMap[session.utm_source] = (sourcesMap[session.utm_source] || 0) + 1
+            }
+            // Dispositivos
+            if (session.device_type) {
+              devicesMap[session.device_type] = (devicesMap[session.device_type] || 0) + 1
+            }
+            // Navegadores
+            if (session.browser) {
+              browsersMap[session.browser] = (browsersMap[session.browser] || 0) + 1
+            }
+            // Sistemas Operativos
+            if (session.os) {
+              osMap[session.os] = (osMap[session.os] || 0) + 1
+            }
+            // Placements
+            if (session.placement) {
+              placementsMap[session.placement] = (placementsMap[session.placement] || 0) + 1
+            }
+          })
+
+          // Convertir mapas a arrays para el TreeFilter
+          filterData.campaigns = Object.entries(campaignsMap)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+
+          filterData.ads = Object.entries(adsMap)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+
+          filterData.sources = Object.entries(sourcesMap)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+
+          filterData.devices = Object.entries(devicesMap)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+
+          filterData.browsers = Object.entries(browsersMap)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+
+          filterData.os = Object.entries(osMap)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+
+          filterData.placements = Object.entries(placementsMap)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+
+          setAvailableFilterData(filterData)
+
           // Analizar fuentes de tráfico - SEPARAR ORGÁNICO VS PAGO
           // Este mapeo determina cómo categorizamos cada fuente
           const organicSources: { [key: string]: number } = {
@@ -842,23 +929,64 @@ export function Analytics() {
     fetchLocationData()
   }, [dateRange, mapView])
 
-  // Efecto para filtrar sesiones cuando cambia la página seleccionada
+  // Efecto para filtrar sesiones cuando cambian los filtros seleccionados
   useEffect(() => {
-    if (selectedPage === 'todos') {
-      setSessions(allSessions) // Mostrar todas
+    // Agn\u00f3stico: Si no hay filtros, mostrar todas las sesiones
+    if (Object.keys(selectedFilters).length === 0) {
+      setSessions(allSessions)
     } else {
-      // Filtrar por página específica
+      // Filtrar sesiones basándose en TODOS los filtros activos
       const filtered = allSessions.filter((session: Session) => {
-        if (session.landing_url) {
-          const urlPath = session.landing_url.split('?')[0]
-          const pageName = urlPath.split('/').pop() || 'home'
-          return pageName === selectedPage
+        // Cada categoría de filtro debe cumplirse (AND entre categorías, OR dentro de categorías)
+        for (const [field, values] of Object.entries(selectedFilters)) {
+          if (values.length === 0) continue
+
+          let fieldMatch = false
+
+          // Verificar si la sesión cumple con al menos uno de los valores de esta categoría
+          for (const value of values) {
+            switch (field) {
+              case 'landing_url':
+                if (session.landing_url) {
+                  const urlPath = session.landing_url.split('?')[0]
+                  const pageName = urlPath.split('/').pop() || 'home'
+                  if (pageName === value) fieldMatch = true
+                }
+                break
+              case 'utm_campaign':
+                if (session.utm_campaign === value) fieldMatch = true
+                break
+              case 'utm_content':
+                if (session.utm_content === value) fieldMatch = true
+                break
+              case 'utm_source':
+                if (session.utm_source === value) fieldMatch = true
+                break
+              case 'device_type':
+                if (session.device_type === value) fieldMatch = true
+                break
+              case 'browser':
+                if (session.browser === value) fieldMatch = true
+                break
+              case 'os':
+                if (session.os === value) fieldMatch = true
+                break
+              case 'placement':
+                if (session.placement === value) fieldMatch = true
+                break
+            }
+          }
+
+          // Si no hay coincidencia en esta categoría, la sesión no pasa el filtro
+          if (!fieldMatch) return false
         }
-        return false
+
+        return true
       })
+
       setSessions(filtered)
     }
-  }, [selectedPage, allSessions]) // Se ejecuta cuando cambia la página o las sesiones
+  }, [selectedFilters, allSessions]) // Se ejecuta cuando cambian los filtros o las sesiones
 
   // Recalcular métricas cuando cambian las sesiones filtradas
   useEffect(() => {
@@ -1332,22 +1460,13 @@ export function Analytics() {
         <div className="space-y-4">
           <h1 className="text-2xl font-bold text-primary">Analíticas</h1>
 
-          {/* Selector de fechas a la IZQUIERDA y Funnels a la DERECHA */}
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+          {/* Selector de fechas y Filtro en árbol juntos */}
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
             <DateRangePicker />
-
-            <Select
-              label="Páginas:"
-              value={selectedPage}
-              onChange={setSelectedPage}
-              options={[
-                { value: 'todos', label: 'Todos' },
-                ...availablePages.map(page => ({
-                  value: page.page,
-                  label: page.page,
-                  count: page.count
-                }))
-              ]}
+            <TreeFilter
+              availableData={availableFilterData}
+              selectedFilters={selectedFilters}
+              onFilterChange={setSelectedFilters}
             />
           </div>
         </div>
@@ -1529,7 +1648,9 @@ export function Analytics() {
             <div>
               <h3 className="text-lg font-semibold text-primary">Registros</h3>
               <p className="text-xs text-secondary mt-0.5">
-                {selectedPage === 'todos' ? 'Todas las páginas' : `Página: ${selectedPage}`}
+                {Object.keys(selectedFilters).length === 0
+                  ? 'Todos los datos'
+                  : `${Object.values(selectedFilters).flat().length} filtros activos`}
               </p>
             </div>
           </div>

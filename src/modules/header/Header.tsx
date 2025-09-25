@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 
 export function Header() {
-  const { theme, toggleTheme } = useTheme()
+  const { theme, toggleTheme, themeSource } = useTheme()
   const { logout, accountName, userEmail, userInitials } = useAuth()
   const isProduction = process.env.NODE_ENV === 'production' && window.location.hostname !== 'localhost'
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -62,13 +62,18 @@ export function Header() {
         <Button
           variant="ghost"
           size="sm"
-          className="p-1.5 sm:p-2"
+          className="p-1.5 sm:p-2 relative"
           onClick={toggleTheme}
+          title={themeSource === 'system' ? 'Tema automático (click para cambiar)' : 'Tema manual (click para cambiar)'}
         >
           {theme === 'light' ? (
             <Icons.moon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
           ) : (
             <Icons.sun className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+          )}
+          {/* Indicador de modo automático */}
+          {themeSource === 'system' && (
+            <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full" />
           )}
         </Button>
         <Button variant="ghost" size="sm" className="p-1.5 sm:p-2 relative">

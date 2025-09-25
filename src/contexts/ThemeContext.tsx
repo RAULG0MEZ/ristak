@@ -2,37 +2,82 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
 import { themes, sharedTokens } from '../theme/tokens'
 
 type ThemeMode = 'light' | 'dark'
+type ThemeSource = 'system' | 'manual' // De dónde viene la preferencia
 
 interface ThemeContextType {
   theme: ThemeMode
   themeData: typeof themes.dark & typeof sharedTokens
   toggleTheme: () => void
   setTheme: (theme: ThemeMode) => void
+  themeSource: ThemeSource // Para saber si es manual o automático
+  resetToSystem: () => void // Para volver al modo automático
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  // Detectar preferencia del sistema operativo
+  const getSystemPreference = (): ThemeMode => {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark'
+    }
+    return 'light'
+  }
+
+  // Estado inicial con detección inteligente
   const [theme, setThemeState] = useState<ThemeMode>(() => {
-    // Check local storage for saved theme preference
-    const savedTheme = localStorage.getItem('theme') as ThemeMode
+    // Primero revisar si hay una preferencia manual guardada
+    const savedTheme = sessionStorage.getItem('manualTheme') as ThemeMode
     if (savedTheme) return savedTheme
 
-    // Auto-detect based on time of day
-    const hour = new Date().getHours()
-    // Dark mode from 7 PM to 7 AM
-    const isNightTime = hour >= 19 || hour < 7
-    return isNightTime ? 'dark' : 'light'
+    // Si no hay preferencia manual, usar la del sistema
+    return getSystemPreference()
+  })
+
+  // Rastrear si el tema fue seteado manualmente
+  const [themeSource, setThemeSource] = useState<ThemeSource>(() => {
+    return sessionStorage.getItem('manualTheme') ? 'manual' : 'system'
   })
 
   const setTheme = (newTheme: ThemeMode) => {
     setThemeState(newTheme)
-    localStorage.setItem('theme', newTheme)
+    setThemeSource('manual')
+    // Guardar en sessionStorage para que persista durante la sesión
+    sessionStorage.setItem('manualTheme', newTheme)
   }
 
   const toggleTheme = () => {
-    setTheme(theme === 'light' ? 'dark' : 'light')
+    const newTheme = theme === 'light' ? 'dark' : 'light'
+    setTheme(newTheme)
   }
+
+  // Función para volver al modo automático del sistema
+  const resetToSystem = () => {
+    sessionStorage.removeItem('manualTheme')
+    setThemeSource('system')
+    setThemeState(getSystemPreference())
+  }
+
+  // Escuchar cambios en la preferencia del sistema
+  useEffect(() => {
+    // Solo aplicar cambios automáticos si no hay override manual
+    if (themeSource === 'system') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+
+      const handleChange = (e: MediaQueryListEvent) => {
+        if (themeSource === 'system') {
+          setThemeState(e.matches ? 'dark' : 'light')
+        }
+      }
+
+      // Agregar listener para cambios en el sistema
+      mediaQuery.addEventListener('change', handleChange)
+
+      return () => {
+        mediaQuery.removeEventListener('change', handleChange)
+      }
+    }
+  }, [themeSource])
 
   useEffect(() => {
     // Apply theme to document root
@@ -62,7 +107,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const themeData = { ...themes[theme], ...sharedTokens }
 
   return (
-    <ThemeContext.Provider value={{ theme, themeData, toggleTheme, setTheme }}>
+    <ThemeContext.Provider value={{ theme, themeData, toggleTheme, setTheme, themeSource, resetToSystem }}>
       {children}
     </ThemeContext.Provider>
   )

@@ -217,14 +217,19 @@ class WebhookService {
 
   // Mapeo flexible para pagos - CON CUSTOM DATA
   async processPayment(data) {
-    // Campos requeridos básicos
-    const requiredFields = ['transaction_id', 'contact_id'];
+    // Extraer transaction_id del customData si existe
+    const transaction_id = data.customData?.transaction_id || data.transaction_id;
+    const contact_id = data.contact_id;
+
+    // Verificar campos requeridos después de intentar extraerlos
     const missingFields = [];
 
-    for (const field of requiredFields) {
-      if (!data[field]) {
-        missingFields.push(field);
-      }
+    if (!transaction_id) {
+      missingFields.push('transaction_id (buscado en customData y nivel principal)');
+    }
+
+    if (!contact_id) {
+      missingFields.push('contact_id');
     }
 
     if (missingFields.length > 0) {
@@ -233,12 +238,13 @@ class WebhookService {
       throw error;
     }
 
-    console.log('[Webhook] Procesando pago con customData:', data.transaction_id);
+    console.log('[Webhook] Procesando pago con transaction_id:', transaction_id, 'desde customData:', data.customData);
 
     // Extraer CustomData específico para pagos: monto, transaction_id, nota
-    const customData = {};
+    const customData = data.customData || {};
+
+    // Si los datos vienen en el nivel principal, también los incluimos
     if (data.monto !== undefined) customData.monto = data.monto;
-    if (data.transaction_id !== undefined) customData.transaction_id = data.transaction_id;
     if (data.nota !== undefined) customData.nota = data.nota;
 
     console.log('[Webhook] CustomData extraído para pago:', customData);
@@ -250,18 +256,46 @@ class WebhookService {
         WHERE ext_crm_id = $1
         LIMIT 1
       `;
-      const contactResult = await databasePool.query(contactQuery, [data.contact_id]);
+      const contactResult = await databasePool.query(contactQuery, [contact_id]);
+
+      let finalContactId;
 
       if (contactResult.rows.length === 0) {
-        throw new Error(`Contacto no encontrado para contact_id: ${data.contact_id}`);
+        // Si el contacto no existe, lo creamos con la información disponible
+        console.log(`[Webhook] Contacto no encontrado para ext_crm_id: ${contact_id}, creando nuevo contacto...`);
+
+        finalContactId = await this.generateContactId();
+
+        const insertQuery = `
+          INSERT INTO contacts (
+            contact_id, first_name, last_name, email, phone,
+            ext_crm_id, status, source, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+          RETURNING contact_id
+        `;
+
+        const insertResult = await databasePool.query(insertQuery, [
+          finalContactId,
+          data.first_name || null,
+          data.last_name || null,
+          data.email || null,
+          data.phone || null,
+          contact_id, // ext_crm_id = el contact_id del webhook
+          'client', // Si está pagando, es cliente
+          'webhook-payment'
+        ]);
+
+        console.log(`✅ [Webhook] Contacto creado desde pago: ${finalContactId}`);
+        finalContactId = insertResult.rows[0].contact_id;
+      } else {
+        finalContactId = contactResult.rows[0].contact_id;
+        console.log(`[Webhook] Contacto encontrado: ${finalContactId}`);
       }
 
-      const finalContactId = contactResult.rows[0].contact_id;
-
       const paymentData = {
-        transaction_id: data.transaction_id,
-        amount: parseFloat(data.amount || data.monto) || 0,
-        description: data.description || data.nota || null,
+        transaction_id: transaction_id,
+        amount: parseFloat(data.amount || customData.monto || data.monto) || 0,
+        description: data.description || customData.nota || data.nota || null,
         contact_id: finalContactId, // Usar nuestro contact_id interno
         currency: data.currency || 'MXN',
         status: 'completed',
@@ -291,7 +325,7 @@ class WebhookService {
         paymentData.payment_method
       ]);
 
-      console.log(`✅ [Webhook] Pago procesado con customData: ${data.transaction_id}`);
+      console.log(`✅ [Webhook] Pago procesado con transaction_id: ${transaction_id}`);
       return result.rows[0];
     } catch (error) {
       console.error('[Webhook] Error en processPayment:', error);

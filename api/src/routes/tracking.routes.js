@@ -51,16 +51,58 @@ router.get('/sessions', async (req, res) => {
   console.log('📊 Fetching tracking sessions for analytics');
 
   try {
-    const { start, end } = req.query;
+    const { start, end, filters } = req.query;
 
     // Validar fechas
     const startDate = start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const endDate = end || new Date().toISOString().split('T')[0];
 
+    // Agn\u00f3stico: Parse de filtros múltiples si vienen
+    let parsedFilters = {};
+    if (filters) {
+      try {
+        parsedFilters = JSON.parse(filters);
+      } catch (e) {
+        console.log('⚠️ Error parseando filtros, usando ninguno');
+      }
+    }
+
     // IMPORTANTE: Las fechas en DB están en UTC
     // El frontend envía fechas en formato YYYY-MM-DD del timezone configurado
     // Usar el timezone del usuario desde el middleware o el header
     const timezone = req.userTimezone || req.headers['x-user-timezone'] || 'America/Mexico_City';
+
+    // Agn\u00f3stico: Construir query con filtros dinámicos
+    let whereClauses = [
+      'DATE(created_at) >= $1',
+      'DATE(created_at) <= $2'
+    ];
+    let queryParams = [startDate, endDate];
+    let paramCounter = 3;
+
+    // Agregar filtros dinámicamente si existen
+    if (Object.keys(parsedFilters).length > 0) {
+      for (const [field, values] of Object.entries(parsedFilters)) {
+        if (!Array.isArray(values) || values.length === 0) continue;
+
+        // Mapear campos del frontend a campos de la DB
+        let dbField = field;
+        if (field === 'landing_url') {
+          // Para páginas, necesitamos hacer un LIKE o extraer el nombre de la página
+          const pageConditions = values.map(value => {
+            queryParams.push(`%/${value}%`);
+            return `landing_url LIKE $${paramCounter++}`;
+          });
+          whereClauses.push(`(${pageConditions.join(' OR ')})`);
+        } else {
+          // Para otros campos, usar IN
+          const placeholders = values.map((_, i) => `$${paramCounter + i}`).join(', ');
+          queryParams.push(...values);
+          paramCounter += values.length;
+          whereClauses.push(`${dbField} IN (${placeholders})`);
+        }
+      }
+    }
 
     const query = `
       SELECT
@@ -91,13 +133,13 @@ router.get('/sessions', async (req, res) => {
         is_bounce,
         properties
       FROM tracking.sessions
-      WHERE DATE(created_at) >= $1
-        AND DATE(created_at) <= $2
+      WHERE ${whereClauses.join(' AND ')}
       ORDER BY created_at DESC
       LIMIT 1000
     `;
 
-    const result = await databasePool.query(query, [startDate, endDate]);
+    console.log('🔍 Query con filtros:', { filters: parsedFilters, paramCount: queryParams.length });
+    const result = await databasePool.query(query, queryParams);
 
     console.log(`✅ Found ${result.rows.length} sessions between ${startDate} and ${endDate} (timezone: ${timezone})`);
 
