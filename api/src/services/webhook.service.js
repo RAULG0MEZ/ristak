@@ -37,10 +37,19 @@ class WebhookService {
     console.log('[Webhook] Procesando contacto con customData:', data.contact_id);
 
     // Extraer CustomData específico para contactos: rstk_adid, rstk_source, rstk_vid
+    // Puede venir en nivel principal O dentro de customData
     const customData = {};
-    if (data.rstk_adid !== undefined) customData.rstk_adid = data.rstk_adid;
-    if (data.rstk_source !== undefined) customData.rstk_source = data.rstk_source;
-    if (data.rstk_vid !== undefined) customData.rstk_vid = data.rstk_vid;
+    if (data.customData) {
+      // Si viene dentro del objeto customData, lo sacamos de ahí
+      if (data.customData.rstk_adid !== undefined) customData.rstk_adid = data.customData.rstk_adid;
+      if (data.customData.rstk_source !== undefined) customData.rstk_source = data.customData.rstk_source;
+      if (data.customData.rstk_vid !== undefined) customData.rstk_vid = data.customData.rstk_vid;
+    } else {
+      // Si viene en nivel principal (retrocompatibilidad)
+      if (data.rstk_adid !== undefined) customData.rstk_adid = data.rstk_adid;
+      if (data.rstk_source !== undefined) customData.rstk_source = data.rstk_source;
+      if (data.rstk_vid !== undefined) customData.rstk_vid = data.rstk_vid;
+    }
 
     console.log('[Webhook] CustomData extraído para contacto:', customData);
 
@@ -68,6 +77,9 @@ class WebhookService {
             phone = COALESCE($5, phone),
             company = COALESCE($6, company),
             status = COALESCE($7, status),
+            visitor_id = COALESCE($8, visitor_id),
+            rstk_adid = COALESCE($9, rstk_adid),
+            rstk_source = COALESCE($10, rstk_source),
             updated_at = NOW()
           WHERE contact_id = $1
           RETURNING contact_id, email, phone
@@ -80,13 +92,16 @@ class WebhookService {
           data.email || null,
           data.phone || null,
           data.company || null,
-          data.status || 'lead'
+          data.status || 'lead',
+          customData.rstk_vid || data.rstk_vid || null,  // visitor_id
+          customData.rstk_adid || data.rstk_adid || null,  // rstk_adid
+          customData.rstk_source || data.rstk_source || null  // rstk_source
         ]);
 
         console.log(`✅ [Webhook] Contacto actualizado: ${finalContactId}`);
 
         // NUEVO: Vincular sesiones de tracking si tenemos visitor_id
-        const visitorId = data.rstk_vid || customData.rstk_vid;
+        const visitorId = customData.rstk_vid || data.rstk_vid;
         if (visitorId) {
           await this.linkTrackingSessions(finalContactId, visitorId);
         }
@@ -100,8 +115,8 @@ class WebhookService {
         const insertQuery = `
           INSERT INTO contacts (
             contact_id, first_name, last_name, email, phone, company,
-            ext_crm_id, status, source, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+            ext_crm_id, status, source, visitor_id, rstk_adid, rstk_source, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
           RETURNING contact_id, email, phone
         `;
 
@@ -114,13 +129,16 @@ class WebhookService {
           data.company || null,
           data.contact_id, // ext_crm_id = GHL contact_id
           data.status || 'lead',
-          'webhook'
+          'webhook',
+          customData.rstk_vid || data.rstk_vid || null,  // visitor_id
+          customData.rstk_adid || data.rstk_adid || null,  // rstk_adid
+          customData.rstk_source || data.rstk_source || null  // rstk_source
         ]);
 
         console.log(`✅ [Webhook] Contacto creado: ${finalContactId}`);
 
         // NUEVO: Vincular sesiones de tracking si tenemos visitor_id
-        const visitorId = data.rstk_vid || customData.rstk_vid;
+        const visitorId = customData.rstk_vid || data.rstk_vid;
         if (visitorId) {
           await this.linkTrackingSessions(finalContactId, visitorId);
         }

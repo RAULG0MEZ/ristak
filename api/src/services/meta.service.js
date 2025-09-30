@@ -12,6 +12,9 @@ const fetch = async (...args) => {
 }
 const { encrypt, decrypt } = require('../utils/crypto.util')
 
+// IMPORTANTE: Servicio de refresh automático de tokens de META
+const { getMetaTokenRefreshService } = require('./meta-token-refresh.service')
+
 const GRAPH_VER = process.env.META_GRAPH_VERSION || 'v23.0'
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VER}`
 
@@ -25,12 +28,16 @@ class MetaService {
       message: null,
     }
     this.intervalHandle = null
-    
+
+    // IMPORTANTE: Inicializar servicio de refresh automático de tokens de META
+    this.tokenRefreshService = getMetaTokenRefreshService()
+    console.log('🔐 [META Service] Servicio de refresh de tokens inicializado')
+
     // Ensure tables exist
     this.ensureTables().catch(err => {
       console.error('Failed to ensure meta tables:', err)
     })
-    
+
     // Check if we need to schedule jobs after database is ready
     setTimeout(() => {
       this.checkAndScheduleJobs()
@@ -521,7 +528,32 @@ class MetaService {
           if (!res.ok) {
             const errorText = await res.text()
             console.error(`Insights API error (${res.status}) for ${currentDate.toISOString().slice(0, 7)}:`, errorText)
-            
+
+            // MANEJO ESPECIAL DEL ERROR 190 DE META (Token expirado/inválido)
+            try {
+              const errorData = JSON.parse(errorText)
+              if (errorData.error?.code === 190) {
+                console.log('🔄 [META Service] Error 190 detectado - intentando renovar token...')
+
+                // Intentar renovar el token automáticamente
+                const tokenRefreshed = await this.tokenRefreshService.handleMetaApiError(errorData.error)
+
+                if (tokenRefreshed) {
+                  console.log('✅ [META Service] Token renovado, reintentando sync...')
+                  // Volver a obtener la configuración con el nuevo token
+                  const newCfg = await this.getConfig()
+                  cfg.access_token = newCfg.access_token
+
+                  // Reconstruir la URL con el nuevo token
+                  const newUrl = `${GRAPH_BASE}/${cfg.ad_account_id}/insights?level=ad&time_increment=1&fields=${encodeURIComponent(fields.join(','))}&time_range=${encodeURIComponent(timeRange)}&limit=500&access_token=${encodeURIComponent(cfg.access_token)}`
+                  url = newUrl
+                  continue // Reintentar con el nuevo token
+                }
+              }
+            } catch (parseError) {
+              // Si no se puede parsear como JSON, continuar con el manejo normal
+            }
+
             // Skip this month if there's an error but continue with others
             if (res.status === 400 || res.status === 500 || res.status === 503) {
               console.log(`Skipping ${currentDate.toISOString().slice(0, 7)} due to API error`)

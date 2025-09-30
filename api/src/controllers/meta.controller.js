@@ -1,4 +1,5 @@
 const metaService = require('../services/meta.service')
+const { getMetaTokenRefreshService } = require('../services/meta-token-refresh.service')
 
 async function startOAuth(req, res) {
   try {
@@ -121,6 +122,79 @@ async function initSchema(req, res) {
   }
 }
 
+// FUNCIONES PARA MANEJO DE TOKENS DE META/FACEBOOK
+async function getTokenStatus(req, res) {
+  try {
+    const tokenService = getMetaTokenRefreshService()
+    const status = await tokenService.getMetaTokenStatus()
+
+    // Agregar información adicional para el usuario
+    if (status.configured) {
+      if (status.requiresReauth) {
+        status.message = '⚠️ El token de Meta requiere re-autenticación. El usuario debe volver a conectar su cuenta de Facebook.'
+      } else if (status.isExpired) {
+        status.message = '❌ El token de Meta ha expirado.'
+      } else if (status.requiresRefresh) {
+        status.message = `⚠️ El token de Meta expira pronto (en ${status.daysUntilExpiry} días). Se renovará automáticamente.`
+      } else {
+        status.message = `✅ Token de Meta válido. Expira en ${status.daysUntilExpiry} días.`
+      }
+    }
+
+    res.json({ success: true, data: status })
+  } catch (err) {
+    res.status(500).json({
+      error: {
+        code: 'meta_token_status_failed',
+        message: err.message
+      }
+    })
+  }
+}
+
+async function refreshToken(req, res) {
+  try {
+    const tokenService = getMetaTokenRefreshService()
+
+    // Verificar primero el estado del token
+    const status = await tokenService.getMetaTokenStatus()
+
+    if (!status.configured) {
+      return res.status(400).json({
+        error: {
+          code: 'meta_not_configured',
+          message: 'Meta no está configurado. Conecta primero tu cuenta de Facebook.'
+        }
+      })
+    }
+
+    if (status.requiresReauth) {
+      return res.status(400).json({
+        error: {
+          code: 'meta_reauth_required',
+          message: 'El token requiere re-autenticación completa. El usuario debe volver a conectar su cuenta de Facebook.'
+        }
+      })
+    }
+
+    // Intentar renovar el token
+    await tokenService.forceMetaTokenRefresh()
+
+    res.json({
+      success: true,
+      message: 'Token de Meta renovado exitosamente',
+      data: await tokenService.getMetaTokenStatus()
+    })
+  } catch (err) {
+    res.status(500).json({
+      error: {
+        code: 'meta_token_refresh_failed',
+        message: `Error renovando token: ${err.message}`
+      }
+    })
+  }
+}
+
 module.exports = {
   startOAuth,
   oauthCallback,
@@ -132,4 +206,6 @@ module.exports = {
   syncStatus,
   disconnect,
   initSchema,
+  getTokenStatus,
+  refreshToken,
 }

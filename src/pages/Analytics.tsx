@@ -549,6 +549,9 @@ export function Analytics() {
           // Obtener páginas únicas de las URLs reales de la DB
           const pageMap: { [key: string]: number } = {}
           response.forEach((session: Session) => {
+            // Agnóstico: Solo contar sesiones con conversión para páginas también
+            if (!session.contact_id) return
+
             if (session.landing_url) {
               const urlPath = session.landing_url.split('?')[0]
               const pageName = urlPath.split('/').pop() || 'home'
@@ -586,6 +589,10 @@ export function Analytics() {
           const placementsMap: { [key: string]: number } = {}
 
           response.forEach((session: Session) => {
+            // Agnóstico: Solo contar sesiones que resultaron en conversión (tienen contact_id)
+            // Esto muestra los datos de las conversiones reales, no solo visitas
+            if (!session.contact_id) return
+
             // Campañas
             if (session.utm_campaign) {
               campaignsMap[session.utm_campaign] = (campaignsMap[session.utm_campaign] || 0) + 1

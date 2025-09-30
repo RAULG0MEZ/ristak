@@ -237,9 +237,15 @@ export function TableWithHierarchy({
       rows.push(
         <tr key={`${level}-${rowId}`} className={cn(
           "border-b border-primary transition-colors",
-          level === 0 && "hover:bg-white/[0.02]",
-          level === 1 && "hover:bg-white/[0.03] bg-white/[0.005]",
-          level === 2 && "hover:bg-white/[0.04] bg-white/[0.01]"
+          // Nivel 0 - Campañas (sin fondo base, solo hover)
+          level === 0 && index % 2 === 0 && "bg-transparent hover:bg-white/[0.02]",
+          level === 0 && index % 2 === 1 && "bg-white/[0.003] hover:bg-white/[0.02]",
+          // Nivel 1 - AdSets (fondo suave alternado)
+          level === 1 && index % 2 === 0 && "bg-white/[0.008] hover:bg-white/[0.03]",
+          level === 1 && index % 2 === 1 && "bg-white/[0.012] hover:bg-white/[0.03]",
+          // Nivel 2 - Anuncios (fondo más claro alternado)
+          level === 2 && index % 2 === 0 && "bg-white/[0.015] hover:bg-white/[0.04]",
+          level === 2 && index % 2 === 1 && "bg-white/[0.020] hover:bg-white/[0.04]"
         )}>
           {visibleColumns.map((column, colIndex) => (
             <td
@@ -295,12 +301,12 @@ export function TableWithHierarchy({
                     
                     {/* Contenido de la celda */}
                     <span className={cn(
-                      level === 0 && "font-medium text-primary",
-                      level === 1 && "text-sm text-secondary", 
-                      level === 2 && "text-sm text-secondary"
+                      level === 0 && "text-base font-medium text-primary",  // Campañas más grandes (16px)
+                      level === 1 && "text-sm text-secondary",              // AdSets tamaño mediano (14px)
+                      level === 2 && "text-xs text-secondary"               // Anuncios más pequeños (12px)
                     )}>
-                      {column.render 
-                        ? column.render(item.data[column.id], item.data, level) 
+                      {column.render
+                        ? column.render(item.data[column.id], item.data, level)
                         : item.data[column.id]}
                     </span>
                   </div>
@@ -308,17 +314,23 @@ export function TableWithHierarchy({
               )}
               {colIndex > 0 && (
                 // Si la fila tiene hijos y está expandida, mostrar "–" para métricas numéricas
-                hasChildren && isExpanded && (typeof item.data[column.id] === 'number' || column.id === 'status') ? (
-                  column.id === 'status' ? (
-                    column.render ? column.render(item.data[column.id], item.data, level) : item.data[column.id]
+                <span className={cn(
+                  level === 0 && "text-base",  // Campañas más grandes (16px)
+                  level === 1 && "text-sm",    // AdSets tamaño mediano (14px)
+                  level === 2 && "text-xs"     // Anuncios más pequeños (12px)
+                )}>
+                  {hasChildren && isExpanded && (typeof item.data[column.id] === 'number' || column.id === 'status') ? (
+                    column.id === 'status' ? (
+                      column.render ? column.render(item.data[column.id], item.data, level) : item.data[column.id]
+                    ) : (
+                      <span className="text-tertiary">–</span>
+                    )
                   ) : (
-                    <span className="text-tertiary">–</span>
-                  )
-                ) : (
-                  column.render 
-                    ? column.render(item.data[column.id], item.data, level) 
-                    : item.data[column.id]
-                )
+                    column.render
+                      ? column.render(item.data[column.id], item.data, level)
+                      : item.data[column.id]
+                  )}
+                </span>
               )}
             </td>
           ))}

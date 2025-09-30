@@ -57,6 +57,9 @@ router.get('/sessions', async (req, res) => {
     const startDate = start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const endDate = end || new Date().toISOString().split('T')[0];
 
+    // DEBUG: Log para ver fechas solicitadas
+    console.log('📅 FECHAS RECIBIDAS:', { start: startDate, end: endDate });
+
     // Agn\u00f3stico: Parse de filtros múltiples si vienen
     let parsedFilters = {};
     if (filters) {
@@ -1330,76 +1333,146 @@ router.post('/collect', async (req, res) => {
     }
 
     // =============================================================================
-    // MANEJO ESPECIAL DE EVENTO ghl_update - CREAR CONTACTO SI NO EXISTE
+    // MANEJO ESPECIAL DE EVENTO ghl_update - CREAR O ACTUALIZAR CONTACTO
     // =============================================================================
     if (data.event === 'ghl_update') {
-      // Si NO encontramos un contacto existente, CREARLO desde el _ud
-      if (!detectedContactId && data.ghl_contact_id) {
-        console.log('🆕 [GHL_UPDATE] Creando nuevo contacto desde _ud:', data.ghl_contact_id);
+      console.log('🔄 [GHL_UPDATE] Procesando evento _ud con ghl_contact_id:', data.ghl_contact_id);
 
-        // Generar ID único para el contacto (mismo formato que webhook.service)
-        const crypto = require('crypto');
-        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        let randomId = '';
-        const randomBytes = crypto.randomBytes(16);
-        for (let i = 0; i < 16; i++) {
-          randomId += characters[randomBytes[i] % characters.length];
-        }
-        const newContactId = `cntct_${randomId}`;
+      // SIEMPRE intentar crear o actualizar el contacto cuando viene ghl_contact_id
+      if (data.ghl_contact_id) {
+        // Buscar si ya existe por ext_crm_id O por visitor_id
+        let existingContactId = null;
 
-        try {
-          // Crear el contacto con los datos del _ud
-          const insertQuery = `
-            INSERT INTO contacts (
-              contact_id,
-              ext_crm_id,
-              email,
-              phone,
-              visitor_id,
-              status,
-              source,
-              created_at,
-              updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-            ON CONFLICT (ext_crm_id) DO UPDATE SET
-              email = COALESCE(EXCLUDED.email, contacts.email),
-              phone = COALESCE(EXCLUDED.phone, contacts.phone),
-              visitor_id = COALESCE(EXCLUDED.visitor_id, contacts.visitor_id),
-              updated_at = NOW()
-            RETURNING contact_id
-          `;
+        // Primero buscar por ext_crm_id (más confiable)
+        const existingByExtCrmQuery = `
+          SELECT contact_id, email, phone, visitor_id, rstk_source
+          FROM contacts
+          WHERE ext_crm_id = $1
+          LIMIT 1
+        `;
+        const existingByExtCrm = await databasePool.query(existingByExtCrmQuery, [data.ghl_contact_id]);
 
-          const result = await databasePool.query(insertQuery, [
-            newContactId,
-            data.ghl_contact_id,  // ext_crm_id = GHL contact ID
-            data.email || null,
-            data.phone || null,
-            visitorId,  // Guardar el visitor_id directamente
-            'lead',
-            'ghl_ud',  // Fuente específica para tracking desde _ud
-          ]);
+        if (existingByExtCrm.rows.length > 0) {
+          existingContactId = existingByExtCrm.rows[0].contact_id;
+          const existing = existingByExtCrm.rows[0];
 
-          detectedContactId = result.rows[0].contact_id;
-          console.log('✅ [GHL_UPDATE] Contacto creado desde _ud:', detectedContactId);
+          console.log('📝 [GHL_UPDATE] Contacto existente encontrado:', existingContactId);
+          console.log('   Email actual:', existing.email, '| Nuevo:', data.email);
+          console.log('   Phone actual:', existing.phone, '| Nuevo:', data.phone);
 
-          // Vincular INMEDIATAMENTE todas las sesiones de este visitor
-          if (visitorId) {
-            await VisitorContactLink(visitorId, detectedContactId);
+          // ACTUALIZAR campos faltantes (agnóstico: actualiza lo que falta)
+          const updateFields = [];
+          const updateValues = [];
+          let valueIndex = 1;
+
+          // Solo actualizar si el campo está vacío y viene dato nuevo
+          if (!existing.email && data.email) {
+            updateFields.push(`email = $${valueIndex++}`);
+            updateValues.push(data.email);
+          }
+          if (!existing.phone && data.phone) {
+            updateFields.push(`phone = $${valueIndex++}`);
+            updateValues.push(data.phone);
+          }
+          if (!existing.visitor_id && visitorId) {
+            updateFields.push(`visitor_id = $${valueIndex++}`);
+            updateValues.push(visitorId);
           }
 
-        } catch (error) {
-          console.error('❌ [GHL_UPDATE] Error creando contacto:', error);
+          // Actualizar rstk_source si viene y no está definido
+          if (!existing.rstk_source && data.utm_source) {
+            updateFields.push(`rstk_source = $${valueIndex++}`);
+            updateValues.push(data.utm_source);
+          }
+
+          // Siempre actualizar timestamp
+          updateFields.push(`updated_at = NOW()`);
+
+          if (updateFields.length > 1) { // Más de solo updated_at
+            updateValues.push(existingContactId); // Para el WHERE
+            const updateQuery = `
+              UPDATE contacts
+              SET ${updateFields.join(', ')}
+              WHERE contact_id = $${valueIndex}
+            `;
+
+            try {
+              await databasePool.query(updateQuery, updateValues);
+              console.log('✅ [GHL_UPDATE] Contacto actualizado con campos faltantes');
+            } catch (error) {
+              console.error('❌ [GHL_UPDATE] Error actualizando contacto:', error);
+            }
+          }
+
+          detectedContactId = existingContactId;
+
+        } else {
+          // NO existe el contacto, CREARLO
+          console.log('🆕 [GHL_UPDATE] Creando nuevo contacto desde _ud');
+
+          // Generar ID único para el contacto (mismo formato que webhook.service)
+          const crypto = require('crypto');
+          const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+          let randomId = '';
+          const randomBytes = crypto.randomBytes(16);
+          for (let i = 0; i < 16; i++) {
+            randomId += characters[randomBytes[i] % characters.length];
+          }
+          const newContactId = `cntct_${randomId}`;
+
+          try {
+            // Crear el contacto con los datos del _ud
+            const insertQuery = `
+              INSERT INTO contacts (
+                contact_id,
+                ext_crm_id,
+                email,
+                phone,
+                visitor_id,
+                status,
+                source,
+                rstk_source,
+                created_at,
+                updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+              ON CONFLICT (ext_crm_id) DO UPDATE SET
+                email = COALESCE(contacts.email, EXCLUDED.email),
+                phone = COALESCE(contacts.phone, EXCLUDED.phone),
+                visitor_id = COALESCE(contacts.visitor_id, EXCLUDED.visitor_id),
+                rstk_source = COALESCE(contacts.rstk_source, EXCLUDED.rstk_source),
+                updated_at = NOW()
+              RETURNING contact_id
+            `;
+
+            const result = await databasePool.query(insertQuery, [
+              newContactId,
+              data.ghl_contact_id,  // ext_crm_id = GHL contact ID
+              data.email || null,
+              data.phone || null,
+              visitorId,  // Guardar el visitor_id directamente
+              'lead',
+              'ghl_ud',  // Fuente específica para tracking desde _ud
+              data.utm_source || null, // Guardar rstk_source si viene
+            ]);
+
+            detectedContactId = result.rows[0].contact_id;
+            console.log('✅ [GHL_UPDATE] Contacto creado desde _ud:', detectedContactId);
+
+          } catch (error) {
+            console.error('❌ [GHL_UPDATE] Error creando contacto:', error);
+          }
         }
-      } else if (detectedContactId && visitorId) {
-        // Si ya existe el contacto, solo vincular las sesiones
-        console.log('🔄 [GHL_UPDATE] Contacto ya existe, vinculando sesiones:', detectedContactId);
-        await VisitorContactLink(visitorId, detectedContactId);
+
+        // SIEMPRE vincular sesiones del visitor al contacto
+        if (detectedContactId && visitorId) {
+          await VisitorContactLink(visitorId, detectedContactId);
+        }
       }
 
       return res.json({
         success: true,
         contact_id: detectedContactId,
-        message: detectedContactId ? 'Contact created/linked via _ud' : 'No contact data to process'
+        message: detectedContactId ? 'Contact processed via _ud' : 'No contact data to process'
       });
     }
 

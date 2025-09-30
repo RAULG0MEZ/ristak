@@ -37,20 +37,34 @@ export function TreeFilter({
   onFilterChange
 }: TreeFilterProps) {
   const { themeData } = useTheme()
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(['root']))
+  const [hoveredCategory, setHoveredCategory] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [isOpen, setIsOpen] = useState(false)
+  const [showSearchResults, setShowSearchResults] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Cerrar dropdown cuando se hace click afuera
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false)
+        setHoveredCategory(null)
+        setShowSearchResults(false)
+        setSearchTerm('')
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Limpiar timeout de hover cuando se desmonta el componente
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current)
+      }
+    }
   }, [])
 
   // Agnóstico: Construir el árbol de filtros basado en los datos disponibles
@@ -188,15 +202,23 @@ export function TreeFilter({
     return tree
   }, [availableData])
 
-  // Agnóstico: Manejar expansión/colapso de nodos
-  const toggleNode = (nodeId: string) => {
-    const newExpanded = new Set(expandedNodes)
-    if (newExpanded.has(nodeId)) {
-      newExpanded.delete(nodeId)
-    } else {
-      newExpanded.add(nodeId)
+  // Agnóstico: Manejar hover con delay para evitar flicker
+  const handleCategoryHover = (categoryId: string) => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current)
     }
-    setExpandedNodes(newExpanded)
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredCategory(categoryId)
+    }, 100) // Pequeño delay para evitar que se abra accidentalmente
+  }
+
+  const handleCategoryLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current)
+    }
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredCategory(null)
+    }, 150) // Delay para permitir mover el mouse al submenu
   }
 
   // Agnóstico: Manejar selección de filtros
@@ -232,110 +254,59 @@ export function TreeFilter({
     return Object.values(selectedFilters).reduce((acc, values) => acc + values.length, 0)
   }, [selectedFilters])
 
-  // Agnóstico: Filtrar nodos por búsqueda
-  const filteredTree = useMemo(() => {
-    if (!searchTerm) return filterTree
+  // Agnóstico: Filtrar nodos por búsqueda (solo aplicar a los items del submenu activo)
+  const getFilteredChildren = (node: FilterNode) => {
+    if (!node.children) return []
+    if (!searchTerm) return node.children
 
     const searchLower = searchTerm.toLowerCase()
-
-    const filterNode = (node: FilterNode): FilterNode | null => {
-      const labelMatches = node.label.toLowerCase().includes(searchLower)
-
-      if (node.children) {
-        const filteredChildren = node.children
-          .map(child => filterNode(child))
-          .filter(Boolean) as FilterNode[]
-
-        if (filteredChildren.length > 0) {
-          return { ...node, children: filteredChildren }
-        }
-      }
-
-      return labelMatches ? node : null
-    }
-
-    return filterTree
-      .map(node => filterNode(node))
-      .filter(Boolean) as FilterNode[]
-  }, [filterTree, searchTerm])
-
-  // Agnóstico: Renderizar un nodo del árbol
-  const renderNode = (node: FilterNode, depth = 0) => {
-    const hasChildren = node.children && node.children.length > 0
-    const isExpanded = expandedNodes.has(node.id)
-    const isSelected = isNodeSelected(node)
-    const Icon = node.icon
-
-    return (
-      <div key={node.id} className="select-none">
-        <div
-          className={`
-            flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer
-            transition-all duration-150
-            ${isSelected
-              ? 'bg-info/20 text-info'
-              : 'hover:bg-primary/5 text-primary'
-            }
-          `}
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          onClick={() => {
-            if (hasChildren) {
-              toggleNode(node.id)
-            } else if (node.field && node.value) {
-              handleFilterToggle(node.field, String(node.value))
-            }
-          }}
-        >
-          {/* Flecha expansión */}
-          {hasChildren && (
-            <Icons.chevronRight
-              className={`
-                w-3 h-3 transition-transform duration-200
-                ${isExpanded ? 'rotate-90' : ''}
-              `}
-            />
-          )}
-
-          {/* Checkbox para items hoja */}
-          {!hasChildren && node.field && (
-            <div className={`
-              w-4 h-4 rounded border-2 transition-all duration-200
-              flex items-center justify-center flex-shrink-0
-              ${isSelected
-                ? 'bg-info border-info'
-                : 'bg-transparent border-primary/40 hover:border-primary'
-              }
-            `}>
-              {isSelected && (
-                <Icons.check className="w-2.5 h-2.5 text-white stroke-[3]" />
-              )}
-            </div>
-          )}
-
-          {/* Icono de categoría */}
-          {Icon && !node.field && (
-            <Icon className="w-3.5 h-3.5 text-secondary" />
-          )}
-
-          {/* Label */}
-          <span className="text-sm flex-1">{node.label}</span>
-
-          {/* Contador */}
-          {node.count !== undefined && (
-            <span className="text-xs text-secondary">
-              {node.count}
-            </span>
-          )}
-        </div>
-
-        {/* Hijos */}
-        {hasChildren && isExpanded && (
-          <div className="ml-2">
-            {node.children!.map(child => renderNode(child, depth + 1))}
-          </div>
-        )}
-      </div>
+    return node.children.filter(child =>
+      child.label.toLowerCase().includes(searchLower)
     )
+  }
+
+  // Agnóstico: Obtener resultados de búsqueda global
+  const getGlobalSearchResults = () => {
+    if (!searchTerm) return []
+
+    const searchLower = searchTerm.toLowerCase()
+    const results: { category: FilterNode; items: FilterNode[] }[] = []
+
+    filterTree.forEach(category => {
+      if (!category.children) return
+
+      const matchingItems = category.children.filter(item =>
+        item.label.toLowerCase().includes(searchLower)
+      )
+
+      if (matchingItems.length > 0) {
+        results.push({
+          category,
+          items: matchingItems
+        })
+      }
+    })
+
+    return results
+  }
+
+  // Agnóstico: Obtener conteo de seleccionados por categoría
+  const getSelectedCountForCategory = (node: FilterNode): number => {
+    if (!node.children) return 0
+    return node.children.filter(child =>
+      child.field && child.value && isNodeSelected(child)
+    ).length
+  }
+
+  // Agnóstico: Manejar cambios en el término de búsqueda
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value)
+    if (value.trim()) {
+      setShowSearchResults(true)
+      setHoveredCategory(null)
+    } else {
+      setShowSearchResults(false)
+    }
   }
 
   return (
@@ -361,62 +332,263 @@ export function TreeFilter({
         />
       </button>
 
-      {/* Dropdown con árbol de filtros */}
+      {/* Dropdown principal con menú tipo navegación */}
       {isOpen && (
-        <div className={`
-          absolute top-full left-0 mt-2 z-50
-          w-80 max-h-96
-          glass rounded-lg shadow-xl
-          animate-in fade-in slide-in-from-top-2 duration-200
-        `}>
-          {/* Header con búsqueda */}
-          <div className="p-3 border-b border-primary/10">
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
+        <div
+          className={`
+            absolute top-full left-0 mt-2 z-50
+            glass rounded-lg shadow-xl
+            animate-in fade-in slide-in-from-top-2 duration-200
+            flex
+          `}
+          onMouseLeave={handleCategoryLeave}
+        >
+          {/* Panel izquierdo: Categorías principales */}
+          <div className="w-48 border-r border-white/5 dark:border-white/5">
+            {/* Header con búsqueda */}
+            <div className="p-3 border-b border-white/5 dark:border-white/5">
+              <div className="relative">
                 <Icons.search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-tertiary" />
                 <input
                   type="text"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar filtros..."
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  placeholder="Buscar..."
                   className="w-full pl-8 pr-3 py-2 text-sm rounded-md
-                           bg-background border border-primary/20
+                           bg-white/5 dark:bg-white/5 border border-white/10 dark:border-white/10
                            text-primary placeholder-tertiary
-                           focus:outline-none focus:ring-2 focus:ring-info/50 focus:border-info
+                           focus:outline-none focus:ring-1 focus:ring-info/30 focus:border-info/50
                            transition-colors duration-200"
                 />
               </div>
+            </div>
+
+            {/* Lista de categorías o resultados de búsqueda */}
+            <div className="py-2 max-h-80 overflow-y-auto">
+              {showSearchResults ? (
+                // Mostrar mensaje cuando está buscando
+                <div className="text-center py-4 text-sm text-secondary px-3">
+                  {getGlobalSearchResults().length > 0
+                    ? `${getGlobalSearchResults().reduce((acc, r) => acc + r.items.length, 0)} resultados`
+                    : 'No se encontraron resultados'
+                  }
+                </div>
+              ) : filterTree.length > 0 ? (
+                filterTree.map(category => {
+                  const Icon = category.icon
+                  const selectedCount = getSelectedCountForCategory(category)
+                  const isHovered = hoveredCategory === category.id
+
+                  return (
+                    <div
+                      key={category.id}
+                      onMouseEnter={() => handleCategoryHover(category.id)}
+                      className={`
+                        flex items-center justify-between px-3 py-2 cursor-pointer
+                        transition-all duration-150
+                        ${isHovered ? 'bg-primary/10' : 'hover:bg-primary/5'}
+                        ${selectedCount > 0 ? 'text-info' : 'text-primary'}
+                      `}
+                    >
+                      <div className="flex items-center gap-2">
+                        {Icon && <Icon className="w-4 h-4" />}
+                        <span className="text-sm font-medium">{category.label}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {selectedCount > 0 && (
+                          <span className="text-xs bg-info/20 text-info px-1.5 py-0.5 rounded">
+                            {selectedCount}
+                          </span>
+                        )}
+                        <Icons.chevronRight className="w-3 h-3 text-secondary" />
+                      </div>
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="text-center py-4 text-sm text-tertiary px-3">
+                  No hay datos disponibles
+                </div>
+              )}
 
               {/* Botón limpiar filtros */}
               {activeFiltersCount > 0 && (
-                <button
-                  onClick={() => onFilterChange({})}
-                  className="px-2 py-1 text-xs text-error hover:bg-error/10
-                           rounded-md transition-colors duration-150"
-                >
-                  Limpiar
-                </button>
+                <div className="border-t border-white/5 dark:border-white/5 mt-2 pt-2 px-3">
+                  <button
+                    onClick={() => {
+                      onFilterChange({})
+                      setHoveredCategory(null)
+                    }}
+                    className="w-full px-2 py-1.5 text-xs text-error hover:bg-error/10
+                             rounded-md transition-colors duration-150 text-center"
+                  >
+                    Limpiar todos ({activeFiltersCount})
+                  </button>
+                </div>
               )}
             </div>
           </div>
 
-          {/* Árbol de filtros */}
-          <div className="p-2 overflow-y-auto max-h-72">
-            {filteredTree.length > 0 ? (
-              filteredTree.map(node => renderNode(node))
-            ) : (
-              <div className="text-center py-4 text-sm text-tertiary">
-                {searchTerm ? 'No se encontraron filtros' : 'No hay datos disponibles'}
-              </div>
-            )}
-          </div>
+          {/* Panel derecho: Opciones de la categoría con hover o resultados de búsqueda */}
+          {(hoveredCategory || showSearchResults) && (
+            <div
+              className="w-64 overflow-y-auto"
+              style={{ maxHeight: 'calc(100vh - 160px)' }}
+              onMouseEnter={() => {
+                if (hoverTimeoutRef.current) {
+                  clearTimeout(hoverTimeoutRef.current)
+                }
+                setHoveredCategory(hoveredCategory)
+              }}
+            >
+              {showSearchResults ? (
+                // Mostrar resultados de búsqueda global
+                <div className="py-2">
+                  {getGlobalSearchResults().map(({ category, items }) => {
+                    const Icon = category.icon
+                    return (
+                      <div key={category.id} className="mb-3">
+                        {/* Título de la categoría */}
+                        <div className="px-3 py-1.5 border-b border-white/5 dark:border-white/5 mb-1 flex items-center gap-2">
+                          {Icon && <Icon className="w-3.5 h-3.5 text-secondary" />}
+                          <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">
+                            {category.label}
+                          </h3>
+                          <span className="text-xs text-tertiary">({items.length})</span>
+                        </div>
 
-          {/* Footer con resumen */}
-          {activeFiltersCount > 0 && (
-            <div className="p-2 border-t border-primary/10">
-              <div className="text-xs text-secondary">
-                {activeFiltersCount} {activeFiltersCount === 1 ? 'filtro activo' : 'filtros activos'}
-              </div>
+                        {/* Lista de opciones con checkboxes */}
+                        <div className="">
+                          {items.map((item, index) => {
+                            const isSelected = isNodeSelected(item)
+
+                            return (
+                              <div
+                                key={item.id}
+                                onClick={() => {
+                                  if (item.field && item.value) {
+                                    handleFilterToggle(item.field, String(item.value))
+                                  }
+                                }}
+                                className={`
+                                  flex items-center gap-2 px-3 py-2 cursor-pointer
+                                  transition-all duration-150
+                                  ${index % 2 === 1 ? 'bg-white/[0.02] dark:bg-white/[0.02]' : ''}
+                                  ${isSelected
+                                    ? 'bg-info/20 text-info hover:bg-info/25'
+                                    : 'hover:bg-white/[0.05] dark:hover:bg-white/[0.05] text-primary'
+                                  }
+                                `}
+                              >
+                                {/* Checkbox */}
+                                <div className={`
+                                  w-4 h-4 rounded border-2 transition-all duration-200
+                                  flex items-center justify-center flex-shrink-0
+                                  ${isSelected
+                                    ? 'bg-info border-info'
+                                    : 'bg-transparent border-primary/40 hover:border-primary'
+                                  }
+                                `}>
+                                  {isSelected && (
+                                    <Icons.check className="w-2.5 h-2.5 text-white stroke-[3]" />
+                                  )}
+                                </div>
+
+                                {/* Label */}
+                                <span className="text-sm flex-1">{item.label}</span>
+
+                                {/* Contador */}
+                                {item.count !== undefined && (
+                                  <span className="text-xs text-secondary">
+                                    {item.count}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                // Mostrar opciones de categoría con hover
+                filterTree.map(category => {
+                  if (category.id !== hoveredCategory) return null
+
+                  const filteredChildren = getFilteredChildren(category)
+
+                  if (filteredChildren.length === 0) {
+                    return (
+                      <div key={category.id} className="p-4 text-center text-sm text-tertiary">
+                        {searchTerm ? 'No se encontraron resultados' : 'Sin opciones disponibles'}
+                      </div>
+                    )
+                  }
+
+                  return (
+                    <div key={category.id} className="py-2">
+                      {/* Título de la categoría */}
+                      <div className="px-3 py-2 border-b border-white/5 dark:border-white/5 mb-1">
+                        <h3 className="text-sm font-semibold text-primary">
+                          {category.label}
+                        </h3>
+                      </div>
+
+                    {/* Lista de opciones con checkboxes */}
+                    <div className="">
+                      {filteredChildren.map((item, index) => {
+                        const isSelected = isNodeSelected(item)
+
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => {
+                              if (item.field && item.value) {
+                                handleFilterToggle(item.field, String(item.value))
+                              }
+                            }}
+                            className={`
+                              flex items-center gap-2 px-3 py-2 cursor-pointer
+                              transition-all duration-150
+                              ${index % 2 === 1 ? 'bg-white/[0.02] dark:bg-white/[0.02]' : ''}
+                              ${isSelected
+                                ? 'bg-info/20 text-info hover:bg-info/25'
+                                : 'hover:bg-white/[0.05] dark:hover:bg-white/[0.05] text-primary'
+                              }
+                            `}
+                          >
+                            {/* Checkbox */}
+                            <div className={`
+                              w-4 h-4 rounded border-2 transition-all duration-200
+                              flex items-center justify-center flex-shrink-0
+                              ${isSelected
+                                ? 'bg-info border-info'
+                                : 'bg-transparent border-primary/40 hover:border-primary'
+                              }
+                            `}>
+                              {isSelected && (
+                                <Icons.check className="w-2.5 h-2.5 text-white stroke-[3]" />
+                              )}
+                            </div>
+
+                            {/* Label */}
+                            <span className="text-sm flex-1">{item.label}</span>
+
+                            {/* Contador */}
+                            {item.count !== undefined && (
+                              <span className="text-xs text-secondary">
+                                {item.count}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+                })
+              )}
             </div>
           )}
         </div>

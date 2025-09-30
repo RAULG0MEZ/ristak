@@ -286,10 +286,16 @@ class CampaignsService {
 
   async getHierarchy(startDate, endDate) {
     try {
+      // LOG INICIAL - Para ver qué fechas llegan
+      console.log('📅 [CAMPAIGNS] Fechas recibidas:', { startDate, endDate });
+
       // Ajustar fechas para incluir todo el día
       const adjusted = adjustDateRange(startDate, endDate);
       startDate = adjusted.startDate;
       endDate = adjusted.endDate;
+
+      // LOG DESPUÉS DEL AJUSTE - Para ver cómo quedan
+      console.log('📅 [CAMPAIGNS] Fechas ajustadas:', { startDate, endDate });
       // Check if Meta ads table exists
       const hasAdsTable = await checkMetaAdsTableExists();
 
