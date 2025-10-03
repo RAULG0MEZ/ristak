@@ -364,21 +364,41 @@ class PaymentsService {
     }
   }
   
-  async getPaymentMetrics(startDate, endDate) {
+  emptyMetrics() {
+    return {
+      completed: { count: 0, total: 0 },
+      refunded: { count: 0, total: 0 },
+      pending: { count: 0, total: 0 },
+      netRevenue: 0,
+      totalRevenue: 0,
+      totalExpenses: 0,
+      avgPayment: 0,
+      successRate: 0,
+      trends: {
+        netRevenue: 0,
+        avgPayment: 0,
+        completedCount: 0,
+        refunds: 0
+      }
+    };
+  }
+
+  async calculateMetrics(startDate, endDate) {
     try {
-      // Ajustar fechas para incluir todo el día
+      if (!startDate || !endDate) {
+        return this.emptyMetrics();
+      }
+
       const adjusted = adjustDateRange(startDate, endDate);
       startDate = adjusted.startDate;
       endDate = adjusted.endDate;
 
-      // Calcular período anterior para trends
-      const periodLength = (endDate - startDate) / (1000 * 60 * 60 * 24);
+      const periodLength = Math.max(1, Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)));
       const previousEndDate = new Date(startDate);
       previousEndDate.setDate(previousEndDate.getDate() - 1);
       const previousStartDate = new Date(previousEndDate);
       previousStartDate.setDate(previousStartDate.getDate() - periodLength);
 
-      // Completed payments
       const completedQuery = `
         SELECT
           COUNT(*) as count,
@@ -388,7 +408,6 @@ class PaymentsService {
         AND status = 'completed'
       `;
 
-      // Refunded payments
       const refundedQuery = `
         SELECT
           COUNT(*) as count,
@@ -398,7 +417,6 @@ class PaymentsService {
         AND status = 'refunded'
       `;
 
-      // Pending payments
       const pendingQuery = `
         SELECT
           COUNT(*) as count,
@@ -408,7 +426,6 @@ class PaymentsService {
         AND status = 'pending'
       `;
 
-      // Income vs Expenses
       const incomeExpenseQuery = `
         SELECT
           COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as income,
@@ -420,7 +437,6 @@ class PaymentsService {
         AND status = 'completed'
       `;
 
-      // Ejecutar queries para período actual
       const [completed, refunded, pending, incomeExpense] = await Promise.all([
         databasePool.query(completedQuery, [startDate, endDate]),
         databasePool.query(refundedQuery, [startDate, endDate]),
@@ -428,7 +444,6 @@ class PaymentsService {
         databasePool.query(incomeExpenseQuery, [startDate, endDate])
       ]);
 
-      // Ejecutar queries para período anterior
       const [prevCompleted, prevRefunded, prevIncomeExpense] = await Promise.all([
         databasePool.query(completedQuery, [previousStartDate, previousEndDate]),
         databasePool.query(refundedQuery, [previousStartDate, previousEndDate]),
@@ -454,7 +469,6 @@ class PaymentsService {
       const prevNetRevenue = prevIncome - prevRefundedTotal;
       const prevAvgPayment = prevIncomeCount > 0 ? prevIncome / prevIncomeCount : 0;
 
-      // Función para calcular trends
       const calculateTrend = (current, previous) => {
         if (previous === 0) return current > 0 ? 100 : 0;
         return ((current - previous) / Math.abs(previous)) * 100;
@@ -487,7 +501,33 @@ class PaymentsService {
         }
       };
     } catch (error) {
-      console.error('Error fetching payment metrics:', error);
+      console.error('Error calculating payment metrics:', error);
+      throw error;
+    }
+  }
+
+  async getPaymentMetrics(startDate, endDate) {
+    return this.calculateMetrics(startDate, endDate);
+  }
+
+  async getPaymentMetricsForAll() {
+    try {
+      const rangeResult = await databasePool.query(`
+        SELECT
+          MIN(COALESCE(paid_at, created_at)) AS min_date,
+          MAX(COALESCE(paid_at, created_at)) AS max_date
+        FROM payments
+      `);
+
+      const rangeRow = rangeResult.rows[0];
+
+      if (!rangeRow || !rangeRow.min_date || !rangeRow.max_date) {
+        return this.emptyMetrics();
+      }
+
+      return this.calculateMetrics(new Date(rangeRow.min_date), new Date(rangeRow.max_date));
+    } catch (error) {
+      console.error('Error fetching metrics for all payments:', error);
       throw error;
     }
   }

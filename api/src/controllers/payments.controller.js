@@ -66,7 +66,15 @@ async function getPayments(req, res) {
 
 async function getPaymentMetrics(req, res) {
   try {
-    const { start, end } = req.query;
+    const { start, end, all = 'false' } = req.query;
+
+    if (all === 'true') {
+      const metrics = await paymentsService.getPaymentMetricsForAll();
+      return res.json({
+        success: true,
+        data: metrics
+      });
+    }
 
     if (!start || !end) {
       return res.status(400).json({
@@ -77,7 +85,6 @@ async function getPaymentMetrics(req, res) {
     const startDate = new Date(start);
     const endDate = new Date(end);
 
-    // Get payment metrics (ya consolidado con trends)
     const combinedMetrics = await paymentsService.getPaymentMetrics(startDate, endDate);
 
     res.json({

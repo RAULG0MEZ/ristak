@@ -94,9 +94,8 @@ export function usePayments(options: UsePaymentsOptions = {}) {
       let metricsUrl: string | null = null;
 
       if (all) {
-        // Fetch all payments with pagination
         paymentsUrl = getApiUrl(`/payments?all=true&page=${actualPage}&limit=${actualLimit}`);
-        // No metrics for all mode
+        metricsUrl = getApiUrl('/payments/metrics?all=true');
       } else if (start && end) {
         // Formatear fechas como YYYY-MM-DD para evitar problemas de timezone
         const startStr = dateToApiString(start);
@@ -109,6 +108,7 @@ export function usePayments(options: UsePaymentsOptions = {}) {
         setPayments([]);
         setTotalCount(0);
         setTotalPages(0);
+        setMetrics(null);
         setLoading(false);
         return;
       }
@@ -136,7 +136,9 @@ export function usePayments(options: UsePaymentsOptions = {}) {
       setTotalPages(paymentsData.totalPages || 0);
 
       if (metricsData) {
-        setMetrics(metricsData.data || null);
+        setMetrics(metricsData.data ?? null);
+      } else if (!metricsUrl) {
+        setMetrics(null);
       }
     } catch (err) {
       console.error('Error fetching payments:', err);
