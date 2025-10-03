@@ -27,6 +27,13 @@ interface ContactMetrics {
   avgLTV: number;
   conversionRate: number;
   appointmentRate: number;
+  trends?: {
+    total: number;
+    withAppointments: number;
+    customers: number;
+    totalLTV: number;
+    avgLTV: number;
+  };
 }
 
 interface DateRange {
@@ -80,9 +87,9 @@ export function useContacts(options: UseContactsOptions = {}) {
       let metricsUrl: string | null = null;
 
       if (all) {
-        // Fetch all contacts with pagination
+        // Fetch all contacts with pagination and global metrics
         contactsUrl = getApiUrl(`/contacts?all=true&page=${actualPage}&limit=${actualLimit}`);
-        // No metrics for all mode
+        metricsUrl = getApiUrl('/contacts/metrics?all=true');
       } else if (start && end) {
         // Formatear fechas como YYYY-MM-DD para evitar problemas de timezone
         const startStr = dateToApiString(start);
@@ -106,7 +113,7 @@ export function useContacts(options: UseContactsOptions = {}) {
 
       const responses = await Promise.all(promises);
       const contactsRes = responses[0];
-      const metricsRes = responses[1];
+      const metricsRes = metricsUrl ? responses[1] : null;
 
       if (!contactsRes.ok || (metricsRes && !metricsRes.ok)) {
         throw new Error('Failed to fetch contacts data');
@@ -121,9 +128,7 @@ export function useContacts(options: UseContactsOptions = {}) {
       setPageSize(contactsData.limit || actualLimit);
       setTotalPages(contactsData.totalPages || 0);
 
-      if (metricsData) {
-        setMetrics(metricsData.data || null);
-      }
+      setMetrics(metricsData?.data ?? null);
     } catch (err) {
       console.error('Error fetching contacts:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');

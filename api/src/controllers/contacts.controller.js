@@ -56,11 +56,20 @@ async function getContacts(req, res) {
 
 async function getContactMetrics(req, res) {
   try {
-    const { start, end } = req.query;
+    const { start, end, all = 'false' } = req.query;
+
+    if (all === 'true') {
+      const combinedMetrics = await contactsService.getContactMetricsForAll();
+
+      return res.json({
+        success: true,
+        data: combinedMetrics
+      });
+    }
 
     if (!start || !end) {
       return res.status(400).json({
-        error: 'Start and end dates are required'
+        error: 'Start and end dates are required when all=false'
       });
     }
 

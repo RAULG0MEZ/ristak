@@ -402,6 +402,60 @@ class ContactsService {
     }
   }
 
+  async getContactMetricsForAll() {
+    try {
+      const totalQuery = `
+        SELECT COUNT(*) as total
+        FROM contacts
+      `;
+
+      const appointmentsQuery = `
+        SELECT COUNT(DISTINCT contact_id) as with_appointments
+        FROM appointments
+      `;
+
+      const customersQuery = `
+        SELECT
+          COUNT(DISTINCT contact_id) as customers,
+          COALESCE(SUM(amount), 0) as total_ltv
+        FROM payments
+        WHERE status = 'completed'
+      `;
+
+      const [total, appointments, customers] = await Promise.all([
+        databasePool.query(totalQuery),
+        databasePool.query(appointmentsQuery),
+        databasePool.query(customersQuery)
+      ]);
+
+      const totalContacts = parseInt(total.rows[0].total) || 0;
+      const withAppointments = parseInt(appointments.rows[0].with_appointments) || 0;
+      const customerCount = parseInt(customers.rows[0].customers) || 0;
+      const totalLTV = parseFloat(customers.rows[0].total_ltv) || 0;
+      const avgLTV = customerCount > 0 ? totalLTV / customerCount : 0;
+
+      return {
+        total: totalContacts,
+        withAppointments,
+        customers: customerCount,
+        totalLTV,
+        avgLTV,
+        conversionRate: totalContacts > 0 ? (customerCount / totalContacts) * 100 : 0,
+        appointmentRate: totalContacts > 0 ? (withAppointments / totalContacts) * 100 : 0,
+        trends: {
+          total: 0,
+          withAppointments: 0,
+          customers: 0,
+          totalLTV: 0,
+          avgLTV: 0
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching global contact metrics:', error);
+      throw error;
+    }
+  }
+
   // Nuevo método para obtener contactos con paginación (sin filtro de fecha)
   async getContactsPaginated(offset, limit) {
     try {
