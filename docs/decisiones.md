@@ -279,5 +279,30 @@
 - **Documentación**: `/docs/TEMPORAL_MATCHING_SYSTEM.md`
 - **Estado**: DISEÑADO pero NO IMPLEMENTADO - requiere testing extensivo
 
+### 2025-10-03 - Identity Resolution System tipo Hyros (IMPLEMENTADO)
+- **Problema detectado**: Último lead (Libni Daniel) tenía visitor_id `v1759537806230_p2ivgz7` que no existía en DB. Las sesiones estaban bajo visitor_id diferente `v1758930977842_768u66p`
+- **Causa raíz**: Sistema anterior hacía UPDATE destructivos de visitor_ids, perdiendo customer journey completo. Frontend (localStorage) y Backend desincronizados.
+- **Decisión**: Implementar Identity Resolution System tipo Hyros - NUNCA modificar visitor_ids originales, solo crear relaciones
+- **Implementación**:
+  - **Tabla**: `tracking.identity_graph` - une todos los visitor_ids, emails, phones al mismo `primary_identity_id`
+  - **Servicio**: `identity.service.js` - maneja todas las operaciones de identidad (link, merge, find)
+  - **Frontend sync**: snip.js actualiza localStorage cuando backend detecta unificación vía fingerprint
+  - **Webhook fix**: Ahora encuentra TODAS las sesiones de TODOS los visitor_ids relacionados al contacto
+  - **Migration**: 663 visitor_ids, 8 contacts, 8 emails migrados exitosamente
+- **Filosofía implementada**:
+  - NUNCA modificar visitor_ids originales
+  - Mantener TODAS las relaciones con metadata completo (linked_at, linked_by, confidence_score)
+  - Una sola fuente de verdad: primary_identity_id
+  - Customer journey completo sin pérdida de información
+  - Frontend y Backend sincronizados en tiempo real
+- **Archivos nuevos**:
+  - `/api/src/services/identity.service.js` - Servicio core de identity resolution
+  - `/api/migrations/010_create_identity_graph.sql` - Tabla y función get_customer_journey()
+- **Archivos modificados**:
+  - `/api/src/routes/tracking.routes.js` - Usa identity system en lugar de UPDATEs destructivos
+  - `/api/src/services/webhook.service.js` - linkTrackingSessions() ahora busca todos los visitor_ids relacionados
+  - snip.js - Sincroniza localStorage cuando backend unifica visitor_ids por fingerprint
+- **Beneficios**: Customer journey completo preservado, audit trail de todas las unificaciones, sistema robusto como Hyros
+
 ---
-*Última actualización: 2025-01-21*
+*Última actualización: 2025-10-03*
