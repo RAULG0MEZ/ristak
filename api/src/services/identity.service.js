@@ -11,7 +11,7 @@
 // - Customer journey completo sin pérdida de información
 // =============================================================================
 
-const databasePool = require('../config/database');
+const { databasePool } = require('../config/database.config');
 
 class IdentityService {
 
