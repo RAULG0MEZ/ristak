@@ -3,6 +3,7 @@ const router = express.Router();
 const UAParser = require('ua-parser-js');
 const contactsService = require('../services/contacts.service');
 const trackingService = require('../services/tracking.service');
+const identityService = require('../services/identity.service');
 const { databasePool } = require('../config/database.config');
 const { verifyCname, normalizeDomain } = require('../utils/dns-helper');
 
@@ -1033,6 +1034,20 @@ fetch(x,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.str
 // Evento enviado exitosamente
 // Si el servidor devolvió un contact_id, actualizar rstk_local
 if(r.status===200){return r.json().then(function(data){
+// CRÍTICO: Si el servidor detectó unificación de visitor_id, actualizar INMEDIATAMENTE
+if(data.unified_visitor_id&&data.unified_visitor_id!==rstkLocal.visitor_id){
+console.log("[HT] 🔄 Visitor unificado:",rstkLocal.visitor_id,"→",data.unified_visitor_id);
+rstkLocal.visitor_id=data.unified_visitor_id;
+u=data.unified_visitor_id; // Actualizar variable global también
+a.setItem("rstk_local",JSON.stringify(rstkLocal));
+setCookie("rstk_vid",data.unified_visitor_id,3650);
+// También actualizar en URL si está presente
+if(location.href.includes('rstk_vid=')){
+var currentUrl=new URL(location.href);
+currentUrl.searchParams.set('rstk_vid',data.unified_visitor_id);
+history.replaceState(null,'',currentUrl.toString());
+}
+}
 if(data.contact_id&&(o.email||o.phone||o.ghl_contact_id)){
 // Actualizar el objeto existente, no reemplazarlo
 rstkLocal.contact_id=data.contact_id;
@@ -2018,64 +2033,66 @@ router.post('/collect', async (req, res) => {
     ]);
 
     // =============================================================================
-    // LINK VISITOR FINGERPRINT - Unificar visitors con mismo device fingerprint
+    // IDENTITY RESOLUTION - Sistema robusto tipo Hyros
+    // =============================================================================
+    // FILOSOFÍA:
+    // - NUNCA modificar visitor_ids originales
+    // - Mantener TODAS las relaciones en identity_graph
+    // - Frontend y Backend sincronizados
+    // - Customer Journey completo sin pérdida de información
     // =============================================================================
 
-    // Si tenemos un device fingerprint con buena confianza, buscar otros visitors
-    if (deviceFingerprint && deviceConfidence >= 70) {
-      try {
-        // Buscar TODAS las sesiones con el mismo device fingerprint (sin límite de tiempo)
-        const fingerprintQuery = `
-          SELECT DISTINCT visitor_id, contact_id, created_at
-          FROM tracking.sessions
-          WHERE device_fingerprint = $1
-          AND visitor_id != $2
-          ORDER BY created_at ASC
-        `;
+    let primaryIdentityId = null;
+    let unifiedVisitorId = null;  // Para devolver al frontend si hay unificación
 
-        const fingerprintMatches = await databasePool.query(fingerprintQuery, [
+    try {
+      // 1. Buscar o crear primary_identity_id para este visitor_id
+      primaryIdentityId = await identityService.getOrCreatePrimaryIdentity(visitorId, deviceFingerprint);
+      console.log(`🔑 [Identity] Primary identity: ${primaryIdentityId} para visitor: ${visitorId}`);
+
+      // 2. Si tenemos fingerprint con buena confianza, buscar otras identities con mismo fingerprint
+      if (deviceFingerprint && deviceConfidence >= 70) {
+        const fingerprintMatches = await identityService.findIdentitiesByFingerprint(
           deviceFingerprint,
-          visitorId
-        ]);
+          primaryIdentityId  // Excluir el actual
+        );
 
-        if (fingerprintMatches.rows.length > 0) {
-          console.log(`🔗 [FINGERPRINT] Encontrados ${fingerprintMatches.rows.length} visitors con mismo device fingerprint`);
+        if (fingerprintMatches.length > 0) {
+          console.log(`🔗 [FINGERPRINT] Encontradas ${fingerprintMatches.length} identities con mismo device fingerprint`);
 
-          // Obtener el visitor_id más antiguo (el primero)
-          const oldestVisitor = fingerprintMatches.rows[0].visitor_id;
-          const hasContact = fingerprintMatches.rows.some(row => row.contact_id);
+          // Obtener la primary_identity MÁS ANTIGUA
+          const oldestIdentity = fingerprintMatches[0];
 
-          // Si alguno tiene contact_id, usar ese
-          const targetVisitor = hasContact ?
-            fingerprintMatches.rows.find(row => row.contact_id)?.visitor_id :
-            oldestVisitor;
+          // Unificar: Mover TODOS los identifiers del nuevo primary_id al existente
+          await identityService.mergePrimaryIdentities(
+            oldestIdentity.primary_identity_id,  // Mantener el más antiguo
+            primaryIdentityId  // Fusionar el nuevo
+          );
 
-          // Unificar todos los visitor_ids al más antiguo o al que tiene contact
-          const updateQuery = `
-            UPDATE tracking.sessions
-            SET visitor_id = $1
-            WHERE device_fingerprint = $2
-            AND visitor_id != $1
-          `;
+          console.log(`✅ [FINGERPRINT] Identities unificadas: ${primaryIdentityId} → ${oldestIdentity.primary_identity_id}`);
 
-          const updateResult = await databasePool.query(updateQuery, [
-            targetVisitor,
-            deviceFingerprint
-          ]);
+          // Actualizar la variable para usar el primary_identity correcto
+          primaryIdentityId = oldestIdentity.primary_identity_id;
 
-          console.log(`✅ [FINGERPRINT] Unificados ${updateResult.rowCount} sesiones al visitor_id: ${targetVisitor}`);
-
-          // Si el visitor actual fue cambiado, actualizar la variable
-          if (visitorId !== targetVisitor) {
-            console.log(`🔄 [FINGERPRINT] Cambiando visitor_id de ${visitorId} a ${targetVisitor}`);
-            // No actualizamos la variable visitorId aquí porque ya se insertó
-            // Pero en el próximo evento ya tendrá el visitor unificado
-          }
+          // IMPORTANTE: Devolver el visitor_id más antiguo para que el frontend lo use
+          unifiedVisitorId = oldestIdentity.visitor_id;
+          console.log(`📲 [FINGERPRINT] Frontend debe usar visitor_id: ${unifiedVisitorId}`);
         }
-      } catch (error) {
-        console.error('❌ [FINGERPRINT] Error unificando visitors:', error);
-        // No fallar el tracking por esto
       }
+
+      // 3. Actualizar la sesión con el primary_identity_id
+      await databasePool.query(
+        `UPDATE tracking.sessions
+         SET primary_identity_id = $1
+         WHERE session_id = $2`,
+        [primaryIdentityId, sessionId]
+      );
+
+      console.log(`✅ [Identity] Sesión ${sessionId} vinculada a identity ${primaryIdentityId}`);
+
+    } catch (error) {
+      console.error('❌ [Identity] Error en resolución de identidad:', error);
+      // No fallar el tracking por esto, continuar sin identity resolution
     }
 
     // =============================================================================
@@ -2087,6 +2104,18 @@ router.post('/collect', async (req, res) => {
     // Devolver el contact_id si se creó/unificó uno
     // Esto permite al cliente guardarlo en rstk_local
     const responseData = { success: true };
+
+    // IMPORTANTE: Devolver el visitor_id unificado si hubo unificación
+    // El frontend debe actualizar su localStorage con este visitor_id
+    if (unifiedVisitorId && unifiedVisitorId !== visitorId) {
+      responseData.unified_visitor_id = unifiedVisitorId;
+      console.log(`📲 [Response] Enviando unified_visitor_id al frontend: ${unifiedVisitorId}`);
+    }
+
+    // Devolver el primary_identity_id para debugging
+    if (primaryIdentityId) {
+      responseData.primary_identity_id = primaryIdentityId;
+    }
 
     // Buscar si esta sesión ya tiene un contact_id asignado
     try {

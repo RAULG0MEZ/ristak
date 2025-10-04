@@ -1,5 +1,6 @@
 const { databasePool } = require('../config/database.config');
 const crypto = require('crypto');
+const identityService = require('./identity.service');
 
 class WebhookService {
   // Generar ID único para contactos con formato cntct_[random]
@@ -151,23 +152,55 @@ class WebhookService {
     }
   }
 
-  // NUEVO: Función para vincular sesiones de tracking con locks para evitar race conditions
+  // =============================================================================
+  // VINCULAR SESIONES CON IDENTITY RESOLUTION
+  // Sistema robusto que encuentra TODAS las sesiones del usuario
+  // =============================================================================
   async linkTrackingSessions(contactId, visitorId) {
-    console.log(`🔗 [Webhook] Intentando vincular sesiones del visitor ${visitorId} al contacto ${contactId}`);
+    console.log(`🔗 [Webhook] Vinculando visitor ${visitorId} al contacto ${contactId} (con Identity Resolution)`);
 
     try {
-      // Primero verificar si hay sesiones de este visitor
-      const countQuery = `
-        SELECT COUNT(*) as total
-        FROM tracking.sessions
-        WHERE visitor_id = $1
-      `;
-      const countResult = await databasePool.query(countQuery, [visitorId]);
-      console.log(`📊 [Webhook] Sesiones encontradas para visitor ${visitorId}: ${countResult.rows[0].total}`);
+      // 1. Obtener o crear primary_identity_id para este visitor_id
+      let primaryIdentityId = await identityService.getPrimaryIdentity('visitor_id', visitorId);
 
-      // Generar hash único para el lock basado en visitor_id + contact_id
-      const lockKey = `${visitorId}_${contactId}`;
-      const hash = require('crypto').createHash('md5').update(lockKey).digest('hex');
+      if (!primaryIdentityId) {
+        // Si no existe, crearlo
+        primaryIdentityId = identityService.generatePrimaryIdentityId();
+        await identityService.linkIdentifier(
+          primaryIdentityId,
+          'visitor_id',
+          visitorId,
+          'webhook',
+          1.0
+        );
+        console.log(`🆕 [Webhook] Nuevo primary_identity creado: ${primaryIdentityId}`);
+      } else {
+        console.log(`🔍 [Webhook] Primary_identity existente: ${primaryIdentityId}`);
+      }
+
+      // 2. Link el contact_id al primary_identity
+      await identityService.linkIdentifier(
+        primaryIdentityId,
+        'contact_id',
+        contactId,
+        'webhook',
+        1.0,
+        { linked_from_visitor: visitorId }
+      );
+
+      // 3. Obtener TODOS los visitor_ids relacionados a este primary_identity
+      const allVisitorIds = await identityService.getAllVisitorIds(primaryIdentityId);
+
+      console.log(`🔍 [Webhook] Encontrados ${allVisitorIds.length} visitor_ids relacionados:`, allVisitorIds);
+
+      if (allVisitorIds.length === 0) {
+        console.log('⚠️ [Webhook] No hay visitor_ids en identity_graph');
+        return 0;
+      }
+
+      // 4. Generar hash único para el lock basado en primary_identity_id
+      const lockKey = primaryIdentityId;
+      const hash = crypto.createHash('md5').update(lockKey).digest('hex');
       const lockId = parseInt(hash.substring(0, 8), 16);
 
       // Intentar obtener lock advisory de PostgreSQL
@@ -179,45 +212,25 @@ class WebhookService {
       }
 
       try {
-        // Verificar si ya existe vinculación
-        const checkQuery = `
-          SELECT COUNT(*) as linked
-          FROM tracking.sessions
-          WHERE visitor_id = $1 AND contact_id = $2
-          LIMIT 1
-        `;
-        const checkResult = await databasePool.query(checkQuery, [visitorId, contactId]);
-
-        if (checkResult.rows[0].linked > 0) {
-          console.log('✓ [Webhook] Sesiones ya vinculadas previamente');
-          return 0;
-        }
-
-        // Vincular todas las sesiones del visitor_id al contact_id
+        // 5. Vincular TODAS las sesiones de TODOS los visitor_ids relacionados
         const updateQuery = `
           UPDATE tracking.sessions
-          SET
-            contact_id = $1,
-            updated_at = NOW()
-          WHERE
-            visitor_id = $2
-            AND contact_id IS NULL
+          SET contact_id = $1, updated_at = NOW()
+          WHERE visitor_id = ANY($2::text[])
+          AND contact_id IS NULL
         `;
-        const updateResult = await databasePool.query(updateQuery, [contactId, visitorId]);
 
-        if (updateResult.rowCount > 0) {
-          console.log(`✅ [Webhook] ${updateResult.rowCount} sesiones vinculadas INMEDIATAMENTE por webhook`);
+        const updateResult = await databasePool.query(updateQuery, [contactId, allVisitorIds]);
 
-          // También actualizar el visitor_id en el contacto si no lo tiene
-          await databasePool.query(
-            `UPDATE contacts
-             SET visitor_id = COALESCE(visitor_id, $2), updated_at = NOW()
-             WHERE contact_id = $1`,
-            [contactId, visitorId]
-          );
-        } else {
-          console.log('ℹ️ [Webhook] No hay sesiones pendientes de vincular');
-        }
+        console.log(`✅ [Webhook] ${updateResult.rowCount} sesiones vinculadas (de ${allVisitorIds.length} visitor_ids)`);
+
+        // 6. Actualizar el visitor_id en el contacto si no lo tiene
+        await databasePool.query(
+          `UPDATE contacts
+           SET visitor_id = COALESCE(visitor_id, $2), updated_at = NOW()
+           WHERE contact_id = $1`,
+          [contactId, visitorId]
+        );
 
         return updateResult.rowCount;
 
