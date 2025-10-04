@@ -233,6 +233,43 @@ class WebhookService {
     }
   }
 
+  // HELPER: Limpiar y validar monto - maneja strings con comas, puntos, y formatos raros
+  cleanAmount(rawAmount) {
+    if (!rawAmount && rawAmount !== 0) return 0;
+
+    // Si ya es número, validar que sea positivo
+    if (typeof rawAmount === 'number') {
+      return Math.abs(rawAmount);
+    }
+
+    // Si es string, limpiar y convertir
+    if (typeof rawAmount === 'string') {
+      // Remover todo excepto dígitos y punto decimal
+      let cleaned = rawAmount.replace(/[^\d.]/g, '');
+
+      // Si tiene múltiples puntos (ej: "78.500.100"), quedarnos solo con el último
+      const parts = cleaned.split('.');
+      if (parts.length > 2) {
+        // Caso: "78.500.100" -> "78500.100"
+        cleaned = parts.slice(0, -1).join('') + '.' + parts[parts.length - 1];
+      }
+
+      const parsed = parseFloat(cleaned);
+
+      // Validar que sea un número válido
+      if (isNaN(parsed)) {
+        console.error('[Webhook] ⚠️ Monto inválido recibido:', rawAmount, '-> parseado como:', parsed);
+        return 0;
+      }
+
+      console.log('[Webhook] 💰 Monto limpiado:', rawAmount, '→', parsed);
+      return Math.abs(parsed);
+    }
+
+    console.error('[Webhook] ⚠️ Tipo de monto desconocido:', typeof rawAmount);
+    return 0;
+  }
+
   // Mapeo flexible para pagos - CON CUSTOM DATA
   async processPayment(data) {
     // Extraer transaction_id del customData si existe
@@ -265,7 +302,7 @@ class WebhookService {
     if (data.monto !== undefined) customData.monto = data.monto;
     if (data.nota !== undefined) customData.nota = data.nota;
 
-    console.log('[Webhook] CustomData extraído para pago:', customData);
+    console.log('[Webhook] CustomData extraído para pago (RAW):', customData);
 
     try {
       // Buscar el contacto por ext_crm_id
@@ -310,9 +347,19 @@ class WebhookService {
         console.log(`[Webhook] Contacto encontrado: ${finalContactId}`);
       }
 
+      // Extraer y limpiar el monto (prioridad: data.amount > customData.monto > data.monto)
+      const rawAmount = data.amount || customData.monto || data.monto;
+      const cleanedAmount = this.cleanAmount(rawAmount);
+
+      console.log('[Webhook] 💵 Procesando monto:', {
+        raw: rawAmount,
+        cleaned: cleanedAmount,
+        source: data.amount ? 'data.amount' : (customData.monto ? 'customData.monto' : 'data.monto')
+      });
+
       const paymentData = {
         transaction_id: transaction_id,
-        amount: parseFloat(data.amount || customData.monto || data.monto) || 0,
+        amount: cleanedAmount,
         description: data.description || customData.nota || data.nota || null,
         contact_id: finalContactId, // Usar nuestro contact_id interno
         currency: data.currency || 'MXN',
